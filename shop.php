@@ -11,8 +11,26 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['cart_data'])) {
     $customer_name = $_POST['customer_name'];
     $customer_phone = $_POST['customer_phone'];
     $delivery_method = isset($_POST['delivery_method']) ? $_POST['delivery_method'] : 'pickup';
-    // NEW: Capture the address
-    $customer_address = isset($_POST['customer_address']) ? trim($_POST['customer_address']) : '';
+    
+    // Address Handling based on whether they are logged in or guest
+    if ($delivery_method === 'delivery') {
+        if (isset($_POST['saved_address']) && !empty($_POST['saved_address'])) {
+            // Logged in user chose an address from their Address Book
+            $customer_address = trim($_POST['saved_address']);
+        } else {
+            // Guest filled out the manual dropdowns
+            $region = isset($_POST['region']) ? trim($_POST['region']) : '';
+            $province = isset($_POST['province']) ? trim($_POST['province']) : '';
+            $city = isset($_POST['city']) ? trim($_POST['city']) : '';
+            $brgy = isset($_POST['barangay']) ? trim($_POST['barangay']) : '';
+            $postal = isset($_POST['postal_code']) ? trim($_POST['postal_code']) : '';
+            $street = isset($_POST['street_name']) ? trim($_POST['street_name']) : '';
+            
+            $customer_address = "$street, Brgy. $brgy, $city, $province, $region, $postal";
+        }
+    } else {
+        $customer_address = ""; // Store Pickup
+    }
     
     if (!empty($cart) && !empty($customer_name)) {
         $conn->begin_transaction();
@@ -23,7 +41,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['cart_data'])) {
                 $first_name = $name_parts[0];
                 $last_name = isset($name_parts[1]) ? $name_parts[1] : '';
                 
-                // If delivery, update the address. If pickup, just ensure record exists.
+                // If delivery, update the temporary address. If pickup, just ensure record exists.
                 $stmt_crm = $conn->prepare("INSERT INTO Customers (first_name, last_name, phone_number, address) 
                                             VALUES (?, ?, ?, ?) 
                                             ON DUPLICATE KEY UPDATE address = VALUES(address)");
@@ -47,6 +65,23 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['cart_data'])) {
                 $stmt_inv->execute();
             }
             $conn->commit();
+
+            // C. SEND THE NOTIFICATION TO THE RIDER'S BELL (If logged in)
+            if (isset($_SESSION['customer_id'])) {
+                $cid = $_SESSION['customer_id'];
+                $notif_title = "Order Placed Successfully";
+                $notif_msg = ($delivery_method === 'delivery') ? "Your items are being prepared for delivery." : "Your items are being prepared for pickup at the garage.";
+                $stmt_notif = $conn->prepare("INSERT INTO notifications (customer_id, title, message) VALUES (?, ?, ?)");
+                $stmt_notif->bind_param("iss", $cid, $notif_title, $notif_msg);
+                $stmt_notif->execute();
+            }
+
+            // D. SEND THE NOTIFICATION TO THE ADMIN/STAFF BELL
+            $admin_title = "New Online Order";
+            $admin_msg = "A new online order has been placed via " . strtoupper($delivery_method) . ". Check the POS Terminal.";
+            $admin_notif_stmt = $conn->prepare("INSERT INTO admin_notifications (title, message) VALUES (?, ?)");
+            $admin_notif_stmt->bind_param("ss", $admin_title, $admin_msg);
+            $admin_notif_stmt->execute();
             
             // Dynamic Success Message
             $message = ($delivery_method === 'delivery') 
@@ -68,20 +103,31 @@ $sql = "SELECT p.product_id, p.product_name, p.category, p.selling_price, p.imag
         ORDER BY p.product_name ASC";
 $result = $conn->query($sql);
 
-// 3. Fetch Notifications if the user is logged in
+// 3. Fetch Notifications and Addresses if the user is logged in
 $notifications = [];
+$my_addresses = [];
 $unread_count = 0;
 
 if (isset($_SESSION['customer_id'])) {
     $cid = $_SESSION['customer_id'];
     
-    // Fetch Notifications
+    if (isset($_GET['read_notif'])) {
+        $conn->query("UPDATE notifications SET is_read = 1 WHERE customer_id = $cid");
+        header("Location: shop.php");
+        exit();
+    }
+
     $notif_result = $conn->query("SELECT * FROM notifications WHERE customer_id = $cid ORDER BY created_at DESC LIMIT 5");
     if ($notif_result) {
         while($n = $notif_result->fetch_assoc()) {
             $notifications[] = $n;
             if ($n['is_read'] == 0) $unread_count++;
         }
+    }
+
+    $addr_result = $conn->query("SELECT * FROM customer_addresses WHERE customer_id = $cid ORDER BY created_at DESC");
+    if ($addr_result) {
+        while($a = $addr_result->fetch_assoc()) $my_addresses[] = $a;
     }
 }
 ?>
@@ -107,17 +153,19 @@ if (isset($_SESSION['customer_id'])) {
         
         <div style="display: flex; align-items: center; gap: 20px;">
             <?php if(isset($_SESSION['customer_id'])): ?>
-                <div style="position: relative; display: inline-block; cursor: pointer;" onclick="document.getElementById('notif-dropdown').style.display = document.getElementById('notif-dropdown').style.display === 'block' ? 'none' : 'block';">
-                    🔔 <span style="color: #9ca3af; font-size: 14px; font-weight: bold;"></span>
+                <div style="position: relative; display: inline-block; cursor: pointer; padding-top: 5px;" onclick="document.getElementById('notif-dropdown').style.display = document.getElementById('notif-dropdown').style.display === 'block' ? 'none' : 'block';">
+                    
+                    <span style="font-size: 28px; display: inline-block; transition: 0.2s;" onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='scale(1)'">🔔</span>
+                    
                     <?php if($unread_count > 0): ?>
-                        <span style="position: absolute; top: -8px; right: -8px; background: #ef4444; color: white; border-radius: 50%; padding: 2px 6px; font-size: 10px; font-weight: bold;"><?php echo $unread_count; ?></span>
+                        <span style="position: absolute; top: -2px; right: -5px; background: #ef4444; color: white; border-radius: 50%; padding: 3px 7px; font-size: 11px; font-weight: bold; box-shadow: 0 0 0 3px #111827;"><?php echo $unread_count; ?></span>
                     <?php endif; ?>
                     
-                    <div id="notif-dropdown" style="display: none; position: absolute; top: 30px; right: 0; left: auto; width: 300px; background: #1f2937; border: 1px solid #374151; border-radius: 8px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.5); z-index: 100; text-align: left;">
+                    <div id="notif-dropdown" style="display: none; position: absolute; top: 45px; right: 0; left: auto; width: 300px; background: #1f2937; border: 1px solid #374151; border-radius: 8px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.5); z-index: 100; text-align: left;">
                         <div style="padding: 10px 15px; border-bottom: 1px solid #374151; display: flex; justify-content: space-between; align-items: center;">
                             <strong style="color: white;">Recent Notifications</strong>
                             <?php if($unread_count > 0): ?>
-                                <a href="account.php?read_notif=true" style="font-size: 11px; color: #3b82f6; text-decoration: none;">Mark all as read</a>
+                                <a href="shop.php?read_notif=true" style="font-size: 11px; color: #3b82f6; text-decoration: none;">Mark all as read</a>
                             <?php endif; ?>
                         </div>
                         <div style="max-height: 300px; overflow-y: auto;">
@@ -182,7 +230,6 @@ if (isset($_SESSION['customer_id'])) {
                         $img = !empty($row["image_path"]) ? htmlspecialchars($row["image_path"]) : 'uploads/default_part.png';
                         $id = $row['product_id'];
                         $name = htmlspecialchars($row['product_name']);
-                        // Safety string formatting to prevent JavaScript breaks
                         $safe_name = addslashes($name); 
                         $price = $row['selling_price'];
                         $category = htmlspecialchars($row['category']);
@@ -206,7 +253,6 @@ if (isset($_SESSION['customer_id'])) {
                         echo "      <h3 class='product-title' style='margin:0; font-size:17px;'>$name</h3>";
                         echo "      <div class='product-meta'><span>⭐⭐⭐⭐⭐ (12)</span><span>Universal Fit</span></div>";
                         echo "      <div class='product-price' style='color:#ef4444; font-weight:900; font-size:22px; margin-top:auto;'>₱" . number_format($price, 2) . "</div>";
-                        // UPGRADED BUTTON: Uses type='button' and strict quote escaping to guarantee it fires
                         echo "      <button type='button' class='btn-generate' style='width:100%; justify-content:center; margin-top:15px; transition:0.3s;' onclick=\"Storefront.addToCart($id, '$safe_name', $price)\">Add to Cart 🛒</button>";
                         echo "  </div>";
                         echo "</div>";
@@ -259,14 +305,68 @@ if (isset($_SESSION['customer_id'])) {
                         </div>
                         <input type="hidden" name="customer_name" value="<?php echo htmlspecialchars($_SESSION['customer_name']); ?>">
                         <input type="hidden" name="customer_phone" value="Registered-Account">
+                        
+                        <div id="address-group" style="display: none; margin-bottom: 15px;">
+                            <label style="color: #9ca3af; font-size: 13px; margin-bottom: 8px; display: block; font-weight: bold;">Select Delivery Address *</label>
+                            <?php if(empty($my_addresses)): ?>
+                                <div style="background: rgba(239, 68, 68, 0.1); border: 1px dashed #ef4444; padding: 12px; border-radius: 6px; text-align: center;">
+                                    <p style="color: #ef4444; font-size: 12px; margin: 0 0 8px 0; font-weight: bold;">No addresses found in your Address Book.</p>
+                                    <a href="account.php" style="color: white; background: #ef4444; padding: 6px 12px; border-radius: 4px; text-decoration: none; font-size: 11px; font-weight: bold; display: inline-block;">Go to Account to Add Address</a>
+                                </div>
+                            <?php else: ?>
+                                <select name="saved_address" style="width:100%; padding:12px; border-radius:6px; border: 1px solid #374151; background:#111827; color:white; box-sizing:border-box;">
+                                    <option value="" disabled selected>Choose a saved address...</option>
+                                    <?php foreach($my_addresses as $addr): ?>
+                                        <option value="<?php echo htmlspecialchars($addr['full_address']); ?>">
+                                            <?php echo $addr['address_label'] == 'Home' ? '🏠 Home' : '🏢 Office'; ?> - <?php echo htmlspecialchars($addr['full_address']); ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                            <?php endif; ?>
+                        </div>
+
                     <?php else: ?>
                         <label style="color: #9ca3af; font-size: 13px; margin-bottom: 8px; display: block; font-weight: bold;">Customer Details</label>
                         <input type="text" name="customer_name" placeholder="Full Name" style="width:100%; padding:10px; margin-bottom:10px; border-radius:4px; border:none; background:#111827; color:white; border: 1px solid #374151;" required>
                         <input type="text" name="customer_phone" placeholder="Phone Number" style="width:100%; padding:10px; margin-bottom:10px; border-radius:4px; border:none; background:#111827; color:white; border: 1px solid #374151;" required>
                         
-                        <div id="address-group" style="display: none; margin-bottom: 15px;">
-                            <label style="color: #9ca3af; font-size: 13px; margin-bottom: 8px; display: block; font-weight: bold;">Delivery Address</label>
-                            <textarea name="customer_address" placeholder="Enter full delivery address..." style="width:100%; padding:10px; border-radius:4px; border:none; background:#111827; color:white; border: 1px solid #374151; height: 80px; resize: none;"></textarea>
+                        <div id="address-group" style="display: none; margin-bottom: 15px; border-top: 1px dashed #374151; padding-top: 15px;">
+                            <label style="color: #10b981; font-size: 13px; margin-bottom: 15px; display: block; font-weight: bold;">Delivery Location</label>
+                            
+                            <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                                <div style="flex: 1;">
+                                    <select name="region" id="ph-region-shop" style="width:100%; padding:10px; border-radius:4px; border: 1px solid #374151; background:#111827; color:white;" required>
+                                        <option value="" disabled selected>Loading Regions...</option>
+                                    </select>
+                                </div>
+                                <div style="flex: 1;">
+                                    <select name="province" id="ph-province-shop" style="width:100%; padding:10px; border-radius:4px; border: 1px solid #374151; background:#111827; color:white;" required>
+                                        <option value="" disabled selected>Select Province</option>
+                                    </select>
+                                </div>
+                            </div>
+                            
+                            <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                                <div style="flex: 1;">
+                                    <select name="city" id="ph-city-shop" style="width:100%; padding:10px; border-radius:4px; border: 1px solid #374151; background:#111827; color:white;" required>
+                                        <option value="" disabled selected>Select City</option>
+                                    </select>
+                                </div>
+                                <div style="flex: 1;">
+                                    <select name="barangay" id="ph-barangay-shop" style="width:100%; padding:10px; border-radius:4px; border: 1px solid #374151; background:#111827; color:white;" required>
+                                        <option value="" disabled selected>Select Barangay</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                                <div style="flex: 1;">
+                                    <input type="number" name="postal_code" placeholder="Postal Code" style="width:100%; padding:10px; border-radius:4px; border:none; background:#111827; color:white; border: 1px solid #374151;" required>
+                                </div>
+                                <div style="flex: 2;">
+                                    <input type="text" name="street_name" placeholder="Street Name, Building No." style="width:100%; padding:10px; border-radius:4px; border:none; background:#111827; color:white; border: 1px solid #374151;" required>
+                                </div>
+                            </div>
                         </div>
                     <?php endif; ?>
                     

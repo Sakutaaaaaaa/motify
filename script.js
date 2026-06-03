@@ -376,16 +376,45 @@ function updateShippingCost() {
     var method = methodInput.value;
     
     // UI Highlighting
-    document.getElementById('label-pickup').style.borderColor = (method === 'pickup') ? '#ef4444' : '#374151';
-    document.getElementById('label-delivery').style.borderColor = (method === 'delivery') ? '#ef4444' : '#374151';
+    let pickupLabel = document.getElementById('label-pickup');
+    let deliveryLabel = document.getElementById('label-delivery');
+    
+    if(pickupLabel) pickupLabel.style.borderColor = (method === 'pickup') ? '#ef4444' : '#374151';
+    if(deliveryLabel) deliveryLabel.style.borderColor = (method === 'delivery') ? '#ef4444' : '#374151';
     
     // SHOW/HIDE ADDRESS FIELD
     var addressGroup = document.getElementById('address-group');
     if (addressGroup) {
         addressGroup.style.display = (method === 'delivery') ? 'block' : 'none';
     }
+
+    // UPDATE GRAND TOTAL
+    let subtotal = 0;
     
-    // ... (rest of your existing calculation code) ...
+    // Calculate subtotal
+    if (typeof Storefront !== 'undefined' && Storefront.cart) {
+        for (let id in Storefront.cart) {
+            let item = Storefront.cart[id];
+            subtotal += (item.price * item.qty);
+        }
+    }
+
+    // Calculate shipping
+    let shippingCost = (method === 'delivery') ? 150.00 : 0.00;
+    
+    let shippingLabelElem = document.getElementById('shipping-label');
+    if(shippingLabelElem) shippingLabelElem.innerText = (method === 'delivery') ? 'Delivery:' : 'Store Pickup:';
+
+    let grandTotal = subtotal + shippingCost;
+
+    // Push the numbers to the screen
+    let subtotalDisplay = document.getElementById('cart-subtotal-display');
+    let shippingDisplay = document.getElementById('cart-shipping-display');
+    let totalDisplay = document.getElementById('cart-total-display');
+
+    if(subtotalDisplay) subtotalDisplay.innerText = subtotal.toFixed(2);
+    if(shippingDisplay) shippingDisplay.innerText = shippingCost.toFixed(2);
+    if(totalDisplay) totalDisplay.innerText = grandTotal.toFixed(2);
 }
 
 function validateAndCheckout() {
@@ -395,16 +424,23 @@ function validateAndCheckout() {
         return;
     }
 
-    // NEW: Check address if delivery is selected
+    // Check address if delivery is selected
     if (methodInput.value === 'delivery') {
-        var addressInput = document.querySelector('textarea[name="customer_address"]');
-        if (addressInput && addressInput.value.trim() === '') {
-            alert("⚠️ Please enter your delivery address.");
+        // If guest checkout is active
+        var streetInput = document.querySelector('input[name="street_name"]');
+        if (streetInput && streetInput.value.trim() === '') {
+            alert("⚠️ Please fill out all required address fields.");
+            return;
+        }
+        // If logged-in user checkout is active
+        var savedAddressSelect = document.querySelector('select[name="saved_address"]');
+        if(savedAddressSelect && (!savedAddressSelect.value || savedAddressSelect.value.trim() === '')) {
+            alert("⚠️ Please select a delivery address.");
             return;
         }
     }
     
-    // ... (existing name/phone validation) ...
+    // Process the order
     Storefront.processOnlineOrder();
 }
 
@@ -462,3 +498,96 @@ function closeEditProfileModal() {
     var modal = document.getElementById('editProfileModal');
     if (modal) modal.style.display = 'none';
 }
+
+// =========================================
+// PHILIPPINE ADDRESS API (PSGC) INTEGRATION
+// =========================================
+document.addEventListener('DOMContentLoaded', function() {
+    // Intelligently target the dropdowns whether we are on account.php or shop.php
+    const rSel = document.getElementById('ph-region-acc') || document.getElementById('ph-region-shop');
+    const pSel = document.getElementById('ph-province-acc') || document.getElementById('ph-province-shop');
+    const cSel = document.getElementById('ph-city-acc') || document.getElementById('ph-city-shop');
+    const bSel = document.getElementById('ph-barangay-acc') || document.getElementById('ph-barangay-shop');
+
+    // If these dropdowns don't exist on the current page, exit silently
+    if (!rSel) return;
+
+    // Load Regions on page load
+    fetch('https://psgc.gitlab.io/api/regions/')
+        .then(res => res.json())
+        .then(data => {
+            data.sort((a, b) => a.name.localeCompare(b.name));
+            rSel.innerHTML = '<option value="" disabled selected>Select Region</option>';
+            data.forEach(r => {
+                let opt = document.createElement('option');
+                opt.value = r.name;
+                opt.dataset.code = r.code;
+                opt.textContent = r.name;
+                rSel.appendChild(opt);
+            });
+        }).catch(err => { rSel.innerHTML = '<option value="">Error loading API</option>'; });
+
+    // When Region is Changed
+    rSel.addEventListener('change', function() {
+        const code = this.options[this.selectedIndex].dataset.code;
+        const name = this.value;
+        pSel.innerHTML = '<option value="" disabled selected>Loading...</option>';
+        cSel.innerHTML = '<option value="" disabled selected>Select City</option>';
+        bSel.innerHTML = '<option value="" disabled selected>Select Barangay</option>';
+
+        fetch(`https://psgc.gitlab.io/api/regions/${code}/provinces/`)
+            .then(res => res.json())
+            .then(data => {
+                if (data.length === 0 || code === '130000000') { 
+                    // NCR or Region without provinces - Skip directly to Cities
+                    pSel.innerHTML = `<option value="${name}" data-code="${code}">${name}</option>`;
+                    fetchCities(`https://psgc.gitlab.io/api/regions/${code}/cities-municipalities/`);
+                } else {
+                    data.sort((a, b) => a.name.localeCompare(b.name));
+                    pSel.innerHTML = '<option value="" disabled selected>Select Province</option>';
+                    data.forEach(p => {
+                        let opt = document.createElement('option');
+                        opt.value = p.name; opt.dataset.code = p.code; opt.textContent = p.name;
+                        pSel.appendChild(opt);
+                    });
+                }
+            });
+    });
+
+    // When Province is Changed
+    pSel.addEventListener('change', function() {
+        const code = this.options[this.selectedIndex].dataset.code;
+        fetchCities(`https://psgc.gitlab.io/api/provinces/${code}/cities-municipalities/`);
+    });
+
+    function fetchCities(url) {
+        cSel.innerHTML = '<option value="" disabled selected>Loading...</option>';
+        bSel.innerHTML = '<option value="" disabled selected>Select Barangay</option>';
+        fetch(url).then(res => res.json()).then(data => {
+            data.sort((a, b) => a.name.localeCompare(b.name));
+            cSel.innerHTML = '<option value="" disabled selected>Select City</option>';
+            data.forEach(c => {
+                let opt = document.createElement('option');
+                opt.value = c.name; opt.dataset.code = c.code; opt.textContent = c.name;
+                cSel.appendChild(opt);
+            });
+        });
+    }
+
+    // When City is Changed
+    cSel.addEventListener('change', function() {
+        const code = this.options[this.selectedIndex].dataset.code;
+        bSel.innerHTML = '<option value="" disabled selected>Loading...</option>';
+        fetch(`https://psgc.gitlab.io/api/cities-municipalities/${code}/barangays/`)
+            .then(res => res.json())
+            .then(data => {
+                data.sort((a, b) => a.name.localeCompare(b.name));
+                bSel.innerHTML = '<option value="" disabled selected>Select Barangay</option>';
+                data.forEach(b => {
+                    let opt = document.createElement('option');
+                    opt.value = b.name; opt.dataset.code = b.code; opt.textContent = b.name;
+                    bSel.appendChild(opt);
+                });
+            });
+    });
+});
