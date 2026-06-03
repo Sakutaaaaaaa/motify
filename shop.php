@@ -67,6 +67,23 @@ $sql = "SELECT p.product_id, p.product_name, p.category, p.selling_price, p.imag
         WHERE i.stock_quantity > 0 AND p.category NOT IN ('Service', 'Services')
         ORDER BY p.product_name ASC";
 $result = $conn->query($sql);
+
+// 3. Fetch Notifications if the user is logged in
+$notifications = [];
+$unread_count = 0;
+
+if (isset($_SESSION['customer_id'])) {
+    $cid = $_SESSION['customer_id'];
+    
+    // Fetch Notifications
+    $notif_result = $conn->query("SELECT * FROM notifications WHERE customer_id = $cid ORDER BY created_at DESC LIMIT 5");
+    if ($notif_result) {
+        while($n = $notif_result->fetch_assoc()) {
+            $notifications[] = $n;
+            if ($n['is_read'] == 0) $unread_count++;
+        }
+    }
+}
 ?>
 
 <!DOCTYPE html>
@@ -87,11 +104,37 @@ $result = $conn->query($sql);
             <a href="#" id="nav-wishlist" onclick="Storefront.toggleWishlistView(event)">Wishlist ❤️</a>
             <a href="account.php">Account</a>
         </nav>
-        <div>
+        
+        <div style="display: flex; align-items: center; gap: 20px;">
             <?php if(isset($_SESSION['customer_id'])): ?>
-                <a href="account.php?action=logout" style="color:#ef4444; text-decoration:none; font-size:14px; font-weight:bold; border: 1px solid #ef4444; padding: 8px 15px; border-radius: 6px;">Sign Out 🚪</a>
-            <?php else: ?>
-                <a href="index.php" style="color:#9ca3af; text-decoration:none; font-size:14px; font-weight:bold; border: 1px solid #374151; padding: 8px 15px; border-radius: 6px;">Staff Login 🔒</a>
+                <div style="position: relative; display: inline-block; cursor: pointer;" onclick="document.getElementById('notif-dropdown').style.display = document.getElementById('notif-dropdown').style.display === 'block' ? 'none' : 'block';">
+                    🔔 <span style="color: #9ca3af; font-size: 14px; font-weight: bold;"></span>
+                    <?php if($unread_count > 0): ?>
+                        <span style="position: absolute; top: -8px; right: -8px; background: #ef4444; color: white; border-radius: 50%; padding: 2px 6px; font-size: 10px; font-weight: bold;"><?php echo $unread_count; ?></span>
+                    <?php endif; ?>
+                    
+                    <div id="notif-dropdown" style="display: none; position: absolute; top: 30px; right: 0; left: auto; width: 300px; background: #1f2937; border: 1px solid #374151; border-radius: 8px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.5); z-index: 100; text-align: left;">
+                        <div style="padding: 10px 15px; border-bottom: 1px solid #374151; display: flex; justify-content: space-between; align-items: center;">
+                            <strong style="color: white;">Recent Notifications</strong>
+                            <?php if($unread_count > 0): ?>
+                                <a href="account.php?read_notif=true" style="font-size: 11px; color: #3b82f6; text-decoration: none;">Mark all as read</a>
+                            <?php endif; ?>
+                        </div>
+                        <div style="max-height: 300px; overflow-y: auto;">
+                            <?php if (empty($notifications)): ?>
+                                <div style="padding: 15px; text-align: center; color: #9ca3af; font-size: 13px;">No new notifications.</div>
+                            <?php else: ?>
+                                <?php foreach($notifications as $notif): ?>
+                                    <div style="padding: 15px; border-bottom: 1px solid #374151; background: <?php echo $notif['is_read'] ? 'transparent' : 'rgba(59, 130, 246, 0.05)'; ?>;">
+                                        <div style="font-size: 13px; font-weight: bold; color: <?php echo $notif['is_read'] ? '#d1d5db' : '#3b82f6'; ?>; margin-bottom: 4px;"><?php echo htmlspecialchars($notif['title']); ?></div>
+                                        <div style="font-size: 12px; color: #9ca3af;"><?php echo htmlspecialchars($notif['message']); ?></div>
+                                        <div style="font-size: 10px; color: #6b7280; margin-top: 6px;"><?php echo date("M d, h:i A", strtotime($notif['created_at'])); ?></div>
+                                    </div>
+                                <?php endforeach; ?>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                </div>
             <?php endif; ?>
         </div>
     </header>
@@ -120,7 +163,7 @@ $result = $conn->query($sql);
                     <input type="checkbox" value="Accessories" onchange="Storefront.filterProducts()" class="filter-category"> Accessories
                 </label>
                 <label style="color: #9ca3af; cursor: pointer; display: flex; align-items: center; gap: 10px; font-size: 14px;">
-                    <input type="checkbox" value="Motorcycle Parts" onchange="Storefront.filterProducts()" class="filter-category"> Engine Parts
+                    <input type="checkbox" value="Motorcycle Parts" onchange="Storefront.filterProducts()" class="filter-category"> Motorcycle Parts
                 </label>
             </div>
 

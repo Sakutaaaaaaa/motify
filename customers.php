@@ -1,108 +1,102 @@
 <?php
-// customers.php - ADMIN FACING
+// customers.php - ADMIN / STAFF CUSTOMER DIRECTORY
 session_start();
 require_once 'db_connection.php';
 
-// Admin Access Check
-if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'Admin') {
+// Gatekeeper: Only Staff and Admins allowed
+if (!isset($_SESSION['user_id'])) {
     header("Location: index.php");
     exit();
 }
 
-$customers = [];
-
-// Try to fetch customers WITH their pending orders count
-try {
-    // This query counts how many 'Pending' orders belong to each customer
-    $sql = "SELECT c.*, 
-            (SELECT COUNT(*) FROM Orders o WHERE o.customer_id = c.customer_id AND o.status = 'Pending') AS pending_orders 
-            FROM Customers c 
-            ORDER BY c.first_name ASC";
-            
-    $result = $conn->query($sql);
-    
-    // If the query fails (e.g., Orders table doesn't exist yet), it throws an exception
-    if (!$result) {
-        throw new Exception("Orders table not found or missing columns.");
-    }
-    
-    while ($row = $result->fetch_assoc()) {
-        $customers[] = $row;
-    }
-} catch (Exception $e) {
-    // FALLBACK: If your Orders table isn't set up yet, it safely loads the customers anyway!
-    $sql_fallback = "SELECT *, 0 AS pending_orders FROM Customers ORDER BY first_name ASC";
-    $result_fallback = $conn->query($sql_fallback);
-    if ($result_fallback) {
-        while ($row = $result_fallback->fetch_assoc()) {
-            $customers[] = $row;
-        }
-    }
-}
+// Fetch all customers from the database
+$query = "SELECT customer_id, first_name, last_name, phone_number, email, created_at FROM customers ORDER BY created_at DESC";
+$result = $conn->query($query);
 ?>
 
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Motify - Client Directory</title>
+    <title>Motify - Customer Directory</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
 </head>
-<body class="store-body">
+<body>
 
     <?php include 'sidebar.php'; ?>
 
     <div class="main-content">
-        <h1 style="color: white; margin-top: 15px; font-size: 28px; margin-bottom: 30px;">👥 Client Directory</h1>
-
-        <div style="background: #1f2937; border: 1px solid #374151; padding: 20px; border-radius: 8px; margin-bottom: 30px; display: flex; justify-content: space-between; align-items: center;">
-            <h2 style="margin: 0; color: white; font-size: 20px;">Registered Clients</h2>
-            <input type="text" placeholder="🔍 Search by name or phone..." style="padding: 10px 15px; background: #111827; border: 1px solid #374151; color: white; border-radius: 6px; width: 300px;">
+        <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 30px;">
+            <div>
+                <h1 style="margin: 0; display: flex; align-items: center; gap: 10px;">
+                    👥 Customer Directory
+                </h1>
+                <p style="margin: 5px 0 0 0; color: #9ca3af;">View and manage registered riders and walk-in clients.</p>
+            </div>
+            
+            <div>
+                <input type="text" placeholder="Search customers..." style="padding: 10px 15px; border-radius: 6px; background: #111827; border: 1px solid #374151; color: white; width: 250px;">
+            </div>
         </div>
 
-        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 20px;">
-            
-            <?php if (empty($customers)): ?>
-                <p style="color: #9ca3af;">No customers registered yet.</p>
-            <?php else: ?>
-                <?php foreach ($customers as $client): ?>
-                    
-                    <?php 
-                        // Get the first letter of their first name for the avatar
-                        $initial = strtoupper(substr($client['first_name'], 0, 1)); 
-                        $fullName = htmlspecialchars($client['first_name'] . ' ' . $client['last_name']);
-                        $phone = !empty($client['phone_number']) ? htmlspecialchars($client['phone_number']) : 'No phone on record';
-                        $email = !empty($client['email']) ? htmlspecialchars($client['email']) : 'No email on record';
-                        $pending_count = isset($client['pending_orders']) ? intval($client['pending_orders']) : 0;
-                    ?>
-
-                    <div class="client-card" style="background: #1f2937; border: 1px solid #374151; border-radius: 8px; padding: 20px; display: flex; align-items: center; gap: 15px; position: relative; transition: 0.2s;">
-                        
-                        <div style="width: 50px; height: 50px; background: #374151; color: white; font-weight: bold; font-size: 20px; display: flex; align-items: center; justify-content: center; border-radius: 50%; flex-shrink: 0;">
-                            <?php echo $initial; ?>
-                        </div>
-
-                        <div style="flex-grow: 1; overflow: hidden;">
-                            <h3 style="margin: 0 0 5px 0; color: white; font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                                <?php echo $fullName; ?>
-                            </h3>
-                            <div style="color: #9ca3af; font-size: 12px; margin-bottom: 3px;">📞 <?php echo $phone; ?></div>
-                            <div style="color: #9ca3af; font-size: 12px;">✉️ <?php echo $email; ?></div>
-                        </div>
-
-                        <?php if ($pending_count > 0): ?>
-                            <div style="position: absolute; top: -10px; right: -10px; background: #f59e0b; color: #111827; font-weight: bold; font-size: 12px; padding: 4px 10px; border-radius: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.2);">
-                                📦 <?php echo $pending_count; ?> Pending
-                            </div>
-                        <?php endif; ?>
-
-                    </div>
-                <?php endforeach; ?>
-            <?php endif; ?>
-
+        <div style="background: #1f2937; border-radius: 12px; border: 1px solid #374151; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
+            <table style="width: 100%; border-collapse: collapse; text-align: left;">
+                <thead>
+                    <tr style="background: rgba(17, 24, 39, 0.5); border-bottom: 1px solid #374151; color: #9ca3af; font-size: 12px; text-transform: uppercase;">
+                        <th style="padding: 15px 20px;">ID</th>
+                        <th style="padding: 15px 20px;">Customer Name</th>
+                        <th style="padding: 15px 20px;">Contact Info</th>
+                        <th style="padding: 15px 20px;">Account Status</th>
+                        <th style="padding: 15px 20px;">Date Joined</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php if ($result && $result->num_rows > 0): ?>
+                        <?php while ($row = $result->fetch_assoc()): 
+                            $formatted_date = date("M d, Y", strtotime($row['created_at']));
+                            
+                            // Determine if they are a registered user (has email) or a walk-in (no email)
+                            $is_registered = !empty($row['email']);
+                            $badge_color = $is_registered ? '#10b981' : '#f59e0b';
+                            $badge_bg = $is_registered ? 'rgba(16, 185, 129, 0.1)' : 'rgba(245, 158, 11, 0.1)';
+                            $badge_text = $is_registered ? 'Registered' : 'Walk-in';
+                        ?>
+                            <tr style="border-bottom: 1px solid #374151; color: white; transition: 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.02)'" onmouseout="this.style.background='transparent'">
+                                <td style="padding: 15px 20px; color: #9ca3af;">#<?php echo $row['customer_id']; ?></td>
+                                
+                                <td style="padding: 15px 20px; font-weight: bold; display: flex; align-items: center; gap: 12px;">
+                                    <div style="width: 35px; height: 35px; background: #374151; color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold;">
+                                        <?php echo strtoupper(substr($row['first_name'], 0, 1) . substr($row['last_name'], 0, 1)); ?>
+                                    </div>
+                                    <?php echo htmlspecialchars($row['first_name'] . ' ' . $row['last_name']); ?>
+                                </td>
+                                
+                                <td style="padding: 15px 20px;">
+                                    <div style="font-size: 14px;"><?php echo htmlspecialchars($row['email'] ?? 'No email provided'); ?></div>
+                                    <div style="font-size: 12px; color: #9ca3af; margin-top: 4px;">📞 <?php echo htmlspecialchars($row['phone_number'] ?? 'No phone'); ?></div>
+                                </td>
+                                
+                                <td style="padding: 15px 20px;">
+                                    <span style="color: <?php echo $badge_color; ?>; background: <?php echo $badge_bg; ?>; padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: bold; border: 1px solid <?php echo $badge_color; ?>;">
+                                        <?php echo $badge_text; ?>
+                                    </span>
+                                </td>
+                                
+                                <td style="padding: 15px 20px; color: #9ca3af; font-size: 14px;">
+                                    <?php echo $formatted_date; ?>
+                                </td>
+                            </tr>
+                        <?php endwhile; ?>
+                    <?php else: ?>
+                        <tr>
+                            <td colspan="5" style="padding: 30px; text-align: center; color: #9ca3af;">No customers found in the database.</td>
+                        </tr>
+                    <?php endif; ?>
+                </tbody>
+            </table>
         </div>
     </div>
 
-    <script src="script.js"></script>
+    <script src="script.js?v=<?php echo time(); ?>"></script>
 </body>
 </html>

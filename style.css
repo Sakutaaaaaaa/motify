@@ -1079,3 +1079,56 @@ body {
     outline: none;
     border-color: #ef4444;
 }
+
+/* =========================================
+   PREMIUM BOOKING MODAL UI (booking.php)
+   ========================================= */
+.modal-overlay {
+    display: none; 
+    position: fixed; 
+    top: 0; 
+    left: 0; 
+    width: 100%; 
+    height: 100%;
+    background: rgba(0, 0, 0, 0.75); /* Darker background */
+    backdrop-filter: blur(4px); /* Modern blur effect behind the popup */
+    z-index: 9999; /* Forces it to the very front */
+    justify-content: center; 
+    align-items: center;
+}
+
+.modal-content {
+    background: #1f2937; 
+    width: 90%; 
+    max-width: 550px; /* Forces it to stay a sleek card shape */
+    padding: 35px; 
+    border-radius: 12px; /* Smoother rounded corners */
+    border: 1px solid #374151; 
+    position: relative; 
+    max-height: 85vh; 
+    overflow-y: auto;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); /* Deep premium shadow */
+    animation: modalFadeIn 0.3s ease-out; /* Smooth entrance animation */
+}
+
+@keyframes modalFadeIn {
+    from { opacity: 0; transform: translateY(-20px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.close-btn {
+    position: absolute; 
+    top: 15px; 
+    right: 20px; 
+    color: #9ca3af; 
+    font-size: 28px; 
+    font-weight: bold;
+    cursor: pointer; 
+    transition: 0.2s;
+    line-height: 1;
+}
+
+.close-btn:hover { 
+    color: #ef4444; 
+    transform: scale(1.1);
+}

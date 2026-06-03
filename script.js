@@ -306,9 +306,40 @@ const Storefront = {
     },
     toggleWishlistView: function(event) {
         if(event) event.preventDefault();
-        alert("❤️ Wishlist saving will be available in Phase 3!");
+
+        const products = document.querySelectorAll('.product-card');
+        
+        // Toggle the mode on or off
+        this.wishlistMode = !this.wishlistMode;
+
+        const wishlistNav = document.getElementById('nav-wishlist');
+
+        if (this.wishlistMode) {
+            // ON: Hide everything except the cards with an active heart
+            products.forEach(card => {
+                const heart = card.querySelector('.btn-wishlist');
+                if (heart && heart.classList.contains('active')) {
+                    card.style.display = 'flex';
+                } else {
+                    card.style.display = 'none';
+                }
+            });
+            
+            // Update the Navbar text to show it's active
+            if(wishlistNav) {
+                wishlistNav.style.color = '#ef4444';
+                wishlistNav.innerText = 'Close Wishlist ❌';
+            }
+        } else {
+            // OFF: Reset the text and run the normal filter to show items again
+            if(wishlistNav) {
+                wishlistNav.style.color = '#f3f4f6';
+                wishlistNav.innerText = 'Wishlist ❤️';
+            }
+            this.filterProducts(); 
+        }
     }
-};
+}
 
 
 // =========================================
@@ -375,4 +406,59 @@ function validateAndCheckout() {
     
     // ... (existing name/phone validation) ...
     Storefront.processOnlineOrder();
+}
+
+// =========================================
+// SERVICE BOOKING MODAL LOGIC (booking.php)
+// =========================================
+function openBookingModal(serviceName) {
+    var serviceInput = document.getElementById('modalServiceType');
+    var modalOverlay = document.getElementById('bookingModal');
+    
+    if (serviceInput && modalOverlay) {
+        serviceInput.value = serviceName;
+        modalOverlay.style.display = 'flex';
+    }
+}
+
+function closeBookingModal() {
+    var modalOverlay = document.getElementById('bookingModal');
+    if (modalOverlay) {
+        modalOverlay.style.display = 'none';
+    }
+}
+
+// Lock past dates in the booking calendar
+document.addEventListener('DOMContentLoaded', function() {
+    var dateInput = document.getElementById('bookingDate');
+    if(dateInput) {
+        var today = new Date().toISOString().split('T')[0];
+        dateInput.setAttribute('min', today);
+    }
+});
+
+// =========================================
+// GARAGE MODAL LOGIC (account.php)
+// =========================================
+function openAddBikeModal() {
+    var modal = document.getElementById('addBikeModal');
+    if (modal) modal.style.display = 'flex';
+}
+
+function closeAddBikeModal() {
+    var modal = document.getElementById('addBikeModal');
+    if (modal) modal.style.display = 'none';
+}
+
+// =========================================
+// EDIT PROFILE MODAL LOGIC (account.php)
+// =========================================
+function openEditProfileModal() {
+    var modal = document.getElementById('editProfileModal');
+    if (modal) modal.style.display = 'flex';
+}
+
+function closeEditProfileModal() {
+    var modal = document.getElementById('editProfileModal');
+    if (modal) modal.style.display = 'none';
 }

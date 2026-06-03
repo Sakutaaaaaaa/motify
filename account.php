@@ -63,6 +63,85 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['login_customer'])) {
         $auth_message = "<div style='color:#ef4444; background:rgba(239, 68, 68, 0.1); padding:10px; border-radius:6px; margin-bottom:15px; border: 1px solid #ef4444;'>❌ Account not found.</div>";
     }
 }
+
+// --- 4. HANDLE ADD BIKE ---
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_bike']) && isset($_SESSION['customer_id'])) {
+    $brand = trim($_POST['brand']);
+    $model = trim($_POST['model']);
+    $year = intval($_POST['year']);
+    $customer_id = $_SESSION['customer_id'];
+
+    try {
+        $stmt = $conn->prepare("INSERT INTO Customer_Bikes (customer_id, brand, model, year) VALUES (?, ?, ?, ?)");
+        $stmt->bind_param("issi", $customer_id, $brand, $model, $year);
+        $stmt->execute();
+        $auth_message = "<div style='color:#10b981; background:rgba(16, 185, 129, 0.1); padding:10px; border-radius:6px; margin-bottom:15px; border: 1px solid #10b981;'>✅ Bike successfully added to your garage!</div>";
+    } catch (Exception $e) {
+        $auth_message = "<div style='color:#ef4444; background:rgba(239, 68, 68, 0.1); padding:10px; border-radius:6px; margin-bottom:15px; border: 1px solid #ef4444;'>❌ Error saving bike data.</div>";
+    }
+}
+
+// --- 5. HANDLE EDIT PROFILE ---
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['edit_profile']) && isset($_SESSION['customer_id'])) {
+    $fname = trim($_POST['first_name']);
+    $lname = trim($_POST['last_name']);
+    $phone = trim($_POST['phone_number']);
+    $cid = $_SESSION['customer_id'];
+
+    try {
+        $stmt = $conn->prepare("UPDATE Customers SET first_name=?, last_name=?, phone_number=? WHERE customer_id=?");
+        $stmt->bind_param("sssi", $fname, $lname, $phone, $cid);
+        $stmt->execute();
+
+        // Dynamically update the Session variables so the UI updates instantly without needing to log out
+        $_SESSION['customer_name'] = $fname . ' ' . $lname;
+        $_SESSION['customer_initials'] = strtoupper(substr($fname, 0, 1) . substr($lname, 0, 1));
+
+        $auth_message = "<div style='color:#10b981; background:rgba(16, 185, 129, 0.1); padding:10px; border-radius:6px; margin-bottom:15px; border: 1px solid #10b981;'>✅ Profile updated successfully!</div>";
+    } catch (Exception $e) {
+        $auth_message = "<div style='color:#ef4444; background:rgba(239, 68, 68, 0.1); padding:10px; border-radius:6px; margin-bottom:15px; border: 1px solid #ef4444;'>❌ Error updating profile.</div>";
+    }
+}
+
+// --- 6. FETCH CUSTOMER DATA, BIKES & NOTIFICATIONS ---
+$my_bikes = [];
+$user_data = [];
+$notifications = [];
+$unread_count = 0;
+
+if (isset($_SESSION['customer_id'])) {
+    $cid = $_SESSION['customer_id'];
+    
+    // Handle marking notifications as read
+    if (isset($_GET['read_notif'])) {
+        $conn->query("UPDATE notifications SET is_read = 1 WHERE customer_id = $cid");
+        header("Location: account.php");
+        exit();
+    }
+
+    // Fetch user details for the Edit Profile Form
+    $user_result = $conn->query("SELECT first_name, last_name, phone_number, email FROM Customers WHERE customer_id = $cid");
+    if ($user_result) {
+        $user_data = $user_result->fetch_assoc();
+    }
+
+    // Fetch Bikes
+    $bike_result = $conn->query("SELECT * FROM Customer_Bikes WHERE customer_id = $cid ORDER BY bike_id DESC");
+    if ($bike_result) {
+        while($b = $bike_result->fetch_assoc()) {
+            $my_bikes[] = $b;
+        }
+    }
+    
+    // Fetch Notifications
+    $notif_result = $conn->query("SELECT * FROM notifications WHERE customer_id = $cid ORDER BY created_at DESC LIMIT 5");
+    if ($notif_result) {
+        while($n = $notif_result->fetch_assoc()) {
+            $notifications[] = $n;
+            if ($n['is_read'] == 0) $unread_count++;
+        }
+    }
+}
 ?>
 
 <!DOCTYPE html>
@@ -83,11 +162,37 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['login_customer'])) {
             <a href="shop.php">Wishlist ❤️</a>
             <a href="account.php" style="color: #ef4444;">Account</a>
         </nav>
-        <div>
+        
+        <div style="display: flex; align-items: center; gap: 20px;">
             <?php if(isset($_SESSION['customer_id'])): ?>
-                <a href="account.php?action=logout" style="color:#ef4444; text-decoration:none; font-size:14px; font-weight:bold; border: 1px solid #ef4444; padding: 8px 15px; border-radius: 6px;">Sign Out 🚪</a>
-            <?php else: ?>
-                <a href="index.php" style="color:#9ca3af; text-decoration:none; font-size:14px; font-weight:bold; border: 1px solid #374151; padding: 8px 15px; border-radius: 6px;">Staff Login 🔒</a>
+                <div style="position: relative; display: inline-block; cursor: pointer;" onclick="document.getElementById('notif-dropdown').style.display = document.getElementById('notif-dropdown').style.display === 'block' ? 'none' : 'block';">
+                    🔔 <span style="color: #9ca3af; font-size: 14px; font-weight: bold;"></span>
+                    <?php if($unread_count > 0): ?>
+                        <span style="position: absolute; top: -8px; right: -8px; background: #ef4444; color: white; border-radius: 50%; padding: 2px 6px; font-size: 10px; font-weight: bold;"><?php echo $unread_count; ?></span>
+                    <?php endif; ?>
+                    
+                    <div id="notif-dropdown" style="display: none; position: absolute; top: 30px; right: 0; left: auto; width: 300px; background: #1f2937; border: 1px solid #374151; border-radius: 8px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.5); z-index: 100; text-align: left;">
+                        <div style="padding: 10px 15px; border-bottom: 1px solid #374151; display: flex; justify-content: space-between; align-items: center;">
+                            <strong style="color: white;">Recent Notifications</strong>
+                            <?php if($unread_count > 0): ?>
+                                <a href="account.php?read_notif=true" style="font-size: 11px; color: #3b82f6; text-decoration: none;">Mark all as read</a>
+                            <?php endif; ?>
+                        </div>
+                        <div style="max-height: 300px; overflow-y: auto;">
+                            <?php if (empty($notifications)): ?>
+                                <div style="padding: 15px; text-align: center; color: #9ca3af; font-size: 13px;">No new notifications.</div>
+                            <?php else: ?>
+                                <?php foreach($notifications as $notif): ?>
+                                    <div style="padding: 15px; border-bottom: 1px solid #374151; background: <?php echo $notif['is_read'] ? 'transparent' : 'rgba(59, 130, 246, 0.05)'; ?>;">
+                                        <div style="font-size: 13px; font-weight: bold; color: <?php echo $notif['is_read'] ? '#d1d5db' : '#3b82f6'; ?>; margin-bottom: 4px;"><?php echo htmlspecialchars($notif['title']); ?></div>
+                                        <div style="font-size: 12px; color: #9ca3af;"><?php echo htmlspecialchars($notif['message']); ?></div>
+                                        <div style="font-size: 10px; color: #6b7280; margin-top: 6px;"><?php echo date("M d, h:i A", strtotime($notif['created_at'])); ?></div>
+                                    </div>
+                                <?php endforeach; ?>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                </div>
             <?php endif; ?>
         </div>
     </header>
@@ -123,73 +228,159 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['login_customer'])) {
                     </form>
                 </div>
             </div>
+            
+            <div style="text-align: center; margin-top: 30px;">
+                <a href="index.php" style="color:#9ca3af; text-decoration:none; font-size:14px; font-weight:bold; border: 1px dashed #374151; padding: 10px 20px; border-radius: 6px; transition: 0.2s;" onmouseover="this.style.borderColor='#3b82f6'; this.style.color='#3b82f6';" onmouseout="this.style.borderColor='#374151'; this.style.color='#9ca3af';">👔 Staff / Admin Login</a>
+            </div>
 
         <?php else: ?>
             <h1 style="font-size: 2.5rem; margin: 0 0 5px 0; color: white;">Rider Dashboard</h1>
-            <p style="color: #9ca3af; margin: 0 0 20px 0;">Manage your rides and service history.</p>
+            <p style="color: #9ca3af; margin: 0 0 30px 0;">Manage your rides and service history.</p>
 
-            <div class="dashboard-grid">
-                
-                <div>
-                    <div class="panel" style="text-align: center;">
-                        <div style="width: 80px; height: 80px; background: #ef4444; color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 32px; font-weight: bold; margin: 0 auto 15px auto;">
+            <div style="display: flex; flex-wrap: wrap; gap: 30px; align-items: flex-start;">
+
+                <div style="flex: 1; min-width: 300px; display: flex; flex-direction: column; gap: 25px;">
+
+                    <div style="background: #1f2937; border: 1px solid #374151; border-radius: 12px; padding: 30px; text-align: center; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3);">
+                        <div style="width: 90px; height: 90px; background: linear-gradient(135deg, #ef4444, #b91c1c); color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 36px; font-weight: 900; margin: 0 auto 15px auto; border: 4px solid #111827;">
                             <?php echo $_SESSION['customer_initials']; ?>
                         </div>
-                        <h2 style="margin: 0; color: white;"><?php echo htmlspecialchars($_SESSION['customer_name']); ?></h2>
-                        <button class="btn-generate" style="width: 100%; justify-content: center; margin-top: 20px; background: #374151; color: white;">Edit Profile ⚙️</button>
+                        <h2 style="margin: 0 0 5px 0; color: white; font-size: 22px;"><?php echo htmlspecialchars($_SESSION['customer_name']); ?></h2>
+                        <p style="margin: 0 0 20px 0; color: #10b981; font-size: 13px; font-weight: bold;">Verified Rider ✓</p>
+                        
+                        <button type="button" onclick="openEditProfileModal()" style="width: 100%; padding: 12px; background: #374151; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; transition: 0.2s;" onmouseover="this.style.background='#4b5563'" onmouseout="this.style.background='#374151'">Edit Profile ⚙️</button>
+                        
+                        <a href="account.php?action=logout" style="display: block; text-align: center; width: 100%; padding: 12px; margin-top: 10px; background: transparent; color: #ef4444; border: 1px solid #ef4444; border-radius: 6px; font-weight: bold; text-decoration: none; box-sizing: border-box; transition: 0.2s;" onmouseover="this.style.background='rgba(239, 68, 68, 0.1)'" onmouseout="this.style.background='transparent'">Sign Out 🚪</a>
                     </div>
 
-                    <div class="panel">
-                        <h3 style="margin: 0 0 15px 0; color: white; border-bottom: 1px solid #374151; padding-bottom: 10px;">🏍️ My Garage</h3>
-                        <div style="background: #111827; padding: 15px; border-radius: 6px; border: 1px solid #10b981;">
-                            <div style="font-weight: bold; color: white;">Yamaha NMAX 155</div>
-                            <div style="color: #9ca3af; font-size: 12px; margin-top: 5px;">2023 Model • Active</div>
-                        </div>
-                        <p style="font-size: 12px; color: #10b981; margin-top: 15px;">✓ Smart Recommendations Active</p>
-                        <button style="width: 100%; padding: 10px; background: transparent; color: #ef4444; border: 1px dashed #ef4444; border-radius: 6px; margin-top: 10px; cursor: pointer;">+ Add Another Bike</button>
+                    <div style="background: #1f2937; border: 1px solid #374151; border-radius: 12px; padding: 25px; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3);">
+                        <h3 style="margin: 0 0 20px 0; color: white; display: flex; justify-content: space-between; align-items: center;">
+                            <span>🏍️ My Garage</span>
+                            <span style="font-size: 12px; background: #374151; padding: 4px 8px; border-radius: 4px; color: #9ca3af;"><?php echo count($my_bikes); ?> Bikes</span>
+                        </h3>
+
+                        <?php if (empty($my_bikes)): ?>
+                            <div style="text-align: center; padding: 25px 10px; background: #111827; border: 1px dashed #374151; border-radius: 8px;">
+                                <p style="color: #9ca3af; margin: 0 0 15px 0; font-size: 14px;">No motorcycles registered yet.</p>
+                                <button type="button" style="background: transparent; color: #ef4444; border: 1px dashed #ef4444; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: bold; width: 100%; transition: 0.2s;" onmouseover="this.style.background='rgba(239, 68, 68, 0.1)'" onmouseout="this.style.background='transparent'" onclick="openAddBikeModal()">+ Add Your First Bike</button>
+                            </div>
+                        <?php else: ?>
+                            <div style="display: flex; flex-direction: column; gap: 12px;">
+                                <?php foreach($my_bikes as $bike): ?>
+                                    <div style="background: #111827; padding: 15px; border-radius: 8px; border-left: 4px solid #10b981;">
+                                        <div style="font-weight: 800; color: white; font-size: 16px; margin-bottom: 4px;"><?php echo htmlspecialchars($bike['brand'] . ' ' . $bike['model']); ?></div>
+                                        <div style="color: #9ca3af; font-size: 12px; display: flex; justify-content: space-between;">
+                                            <span><?php echo htmlspecialchars($bike['year']); ?> Model</span>
+                                            <span style="color: #10b981; font-weight: bold;">● Active</span>
+                                        </div>
+                                    </div>
+                                <?php endforeach; ?>
+                                <button type="button" style="width: 100%; padding: 12px; background: transparent; color: #9ca3af; border: 1px dashed #374151; border-radius: 8px; margin-top: 5px; cursor: pointer; font-weight: bold; transition: 0.2s;" onmouseover="this.style.color='#ef4444'; this.style.borderColor='#ef4444';" onmouseout="this.style.color='#9ca3af'; this.style.borderColor='#374151';" onclick="openAddBikeModal()">+ Add Another Bike</button>
+                            </div>
+                        <?php endif; ?>
                     </div>
+
                 </div>
 
-                <div>
-                    <div style="display: flex; gap: 15px; margin-bottom: 25px;">
-                        <a href="shop.php" class="stat-box">
-                            <div style="font-size: 24px; margin-bottom: 5px;">🛒</div>
-                            <div style="color: white; font-weight: bold;">Shop Parts</div>
+                <div style="flex: 2; min-width: 400px; display: flex; flex-direction: column; gap: 25px;">
+
+                    <div style="display: flex; gap: 20px; flex-wrap: wrap;">
+                        <a href="shop.php" style="flex: 1; min-width: 180px; background: linear-gradient(135deg, #1f2937, #111827); border: 1px solid #374151; border-radius: 12px; padding: 25px; text-decoration: none; display: flex; align-items: center; gap: 20px; transition: 0.3s; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.2);" onmouseover="this.style.borderColor='#ef4444'; this.style.transform='translateY(-3px)';" onmouseout="this.style.borderColor='#374151'; this.style.transform='translateY(0)';">
+                            <div style="font-size: 36px;">🛒</div>
+                            <div>
+                                <div style="color: white; font-weight: 900; font-size: 18px;">Shop Parts</div>
+                                <div style="color: #9ca3af; font-size: 13px; margin-top: 4px;">Browse online store</div>
+                            </div>
                         </a>
-                        <a href="booking.php" class="stat-box">
-                            <div style="font-size: 24px; margin-bottom: 5px;">🔧</div>
-                            <div style="color: white; font-weight: bold;">Book Service</div>
+                        <a href="booking.php" style="flex: 1; min-width: 180px; background: linear-gradient(135deg, #1f2937, #111827); border: 1px solid #374151; border-radius: 12px; padding: 25px; text-decoration: none; display: flex; align-items: center; gap: 20px; transition: 0.3s; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.2);" onmouseover="this.style.borderColor='#ef4444'; this.style.transform='translateY(-3px)';" onmouseout="this.style.borderColor='#374151'; this.style.transform='translateY(0)';">
+                            <div style="font-size: 36px;">🔧</div>
+                            <div>
+                                <div style="color: white; font-weight: 900; font-size: 18px;">Book Service</div>
+                                <div style="color: #9ca3af; font-size: 13px; margin-top: 4px;">Schedule maintenance</div>
+                            </div>
                         </a>
                     </div>
 
-                    <div class="panel">
-                        <h3 style="margin: 0 0 15px 0; color: white; border-bottom: 1px solid #374151; padding-bottom: 10px;">📦 Recent Orders</h3>
+                    <div style="background: #1f2937; border: 1px solid #374151; border-radius: 12px; padding: 25px; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3);">
+                        <h3 style="margin: 0 0 20px 0; color: white; border-bottom: 1px solid #374151; padding-bottom: 15px;">📦 Recent Orders</h3>
                         
                         <div style="text-align: center; padding: 30px 0;">
-                            <div style="font-size: 30px; margin-bottom: 10px; opacity: 0.5;">🛒</div>
-                            <p style="color: #9ca3af; font-size: 14px; margin: 0;">No recent orders found.</p>
-                            <a href="shop.php" style="color: #ef4444; font-size: 13px; text-decoration: none; margin-top: 10px; display: inline-block;">Start shopping &rarr;</a>
+                            <div style="font-size: 40px; margin-bottom: 15px; opacity: 0.3;">🛍️</div>
+                            <p style="color: #9ca3af; font-size: 15px; margin: 0;">You haven't placed any orders yet.</p>
+                            <a href="shop.php" style="color: #ef4444; font-size: 14px; text-decoration: none; margin-top: 15px; display: inline-block; font-weight: bold; border-bottom: 1px dashed #ef4444;">Start shopping &rarr;</a>
                         </div>
                     </div>
 
-                    <div class="panel">
-                        <h3 style="margin: 0 0 15px 0; color: white; border-bottom: 1px solid #374151; padding-bottom: 10px;">📅 Service Appointments</h3>
-                        <div class="history-row">
+                    <div style="background: #1f2937; border: 1px solid #374151; border-radius: 12px; padding: 25px; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3);">
+                        <h3 style="margin: 0 0 20px 0; color: white; border-bottom: 1px solid #374151; padding-bottom: 15px;">📅 Service Appointments</h3>
+                        
+                        <div style="display: flex; justify-content: space-between; align-items: center; background: #111827; padding: 20px; border-radius: 8px; border-left: 4px solid #10b981;">
                             <div>
-                                <div style="font-weight: bold;">CVT Cleaning & Tuning</div>
-                                <div style="font-size: 12px; color: #9ca3af; margin-top: 4px;">May 15, 2026 • 2:00 PM</div>
+                                <div style="font-weight: 900; color: white; font-size: 16px;">CVT Cleaning & Tuning</div>
+                                <div style="font-size: 13px; color: #9ca3af; margin-top: 6px;">May 15, 2026 • 2:00 PM</div>
                             </div>
                             <div style="text-align: right;">
-                                <div style="color: #10b981; font-weight: bold; font-size: 14px;">Completed ✅</div>
-                                <div style="font-size: 12px; color: #9ca3af; margin-top: 4px;">₱1,200.00</div>
+                                <div style="color: #10b981; font-weight: 900; font-size: 14px; background: rgba(16, 185, 129, 0.1); padding: 4px 10px; border-radius: 20px; display: inline-block;">Completed ✅</div>
+                                <div style="font-size: 14px; color: white; font-weight: bold; margin-top: 6px;">₱1,200.00</div>
                             </div>
                         </div>
+
                     </div>
 
                 </div>
             </div>
+
+            <div id="addBikeModal" class="modal-overlay">
+                <div class="modal-content">
+                    <span class="close-btn" onclick="closeAddBikeModal()">&times;</span>
+                    <h2 style="color: white; margin-top: 0; border-bottom: 1px solid #374151; padding-bottom: 15px;">🏍️ Register a Motorcycle</h2>
+                    
+                    <form method="POST" action="">
+                        <label style="color: #9ca3af; font-size: 13px; margin-bottom: 8px; display: block; font-weight: bold;">Brand (e.g., Yamaha, Honda)</label>
+                        <input type="text" name="brand" class="auth-input" style="background:#111827; border:1px solid #374151; margin-bottom: 20px; width: 100%; box-sizing: border-box;" required>
+                        
+                        <label style="color: #9ca3af; font-size: 13px; margin-bottom: 8px; display: block; font-weight: bold;">Model (e.g., NMAX 155, Click 125i)</label>
+                        <input type="text" name="model" class="auth-input" style="background:#111827; border:1px solid #374151; margin-bottom: 20px; width: 100%; box-sizing: border-box;" required>
+
+                        <label style="color: #9ca3af; font-size: 13px; margin-bottom: 8px; display: block; font-weight: bold;">Year Model</label>
+                        <input type="number" name="year" class="auth-input" placeholder="2023" style="background:#111827; border:1px solid #374151; margin-bottom: 25px; width: 100%; box-sizing: border-box;" required>
+
+                        <button type="submit" name="add_bike" class="btn-generate" style="width: 100%; justify-content: center; padding: 15px; font-size: 16px;">Save to Garage</button>
+                    </form>
+                </div>
+            </div>
+
+            <div id="editProfileModal" class="modal-overlay">
+                <div class="modal-content">
+                    <span class="close-btn" onclick="closeEditProfileModal()">&times;</span>
+                    <h2 style="color: white; margin-top: 0; border-bottom: 1px solid #374151; padding-bottom: 15px;">⚙️ Edit Profile</h2>
+                    
+                    <form method="POST" action="">
+                        <div style="display:flex; gap:15px; margin-bottom: 20px;">
+                            <div style="flex:1;">
+                                <label style="color: #9ca3af; font-size: 13px; margin-bottom: 8px; display: block; font-weight: bold;">First Name</label>
+                                <input type="text" name="first_name" class="auth-input" value="<?php echo htmlspecialchars($user_data['first_name'] ?? ''); ?>" style="background:#111827; border:1px solid #374151; width: 100%; box-sizing: border-box;" required>
+                            </div>
+                            <div style="flex:1;">
+                                <label style="color: #9ca3af; font-size: 13px; margin-bottom: 8px; display: block; font-weight: bold;">Last Name</label>
+                                <input type="text" name="last_name" class="auth-input" value="<?php echo htmlspecialchars($user_data['last_name'] ?? ''); ?>" style="background:#111827; border:1px solid #374151; width: 100%; box-sizing: border-box;" required>
+                            </div>
+                        </div>
+
+                        <label style="color: #9ca3af; font-size: 13px; margin-bottom: 8px; display: block; font-weight: bold;">Phone Number</label>
+                        <input type="text" name="phone_number" class="auth-input" value="<?php echo htmlspecialchars($user_data['phone_number'] ?? ''); ?>" style="background:#111827; border:1px solid #374151; margin-bottom: 20px; width: 100%; box-sizing: border-box;" required>
+
+                        <label style="color: #9ca3af; font-size: 13px; margin-bottom: 8px; display: block; font-weight: bold;">Email (Read Only)</label>
+                        <input type="text" value="<?php echo htmlspecialchars($user_data['email'] ?? ''); ?>" class="auth-input" style="background:#374151; border:1px solid #374151; margin-bottom: 25px; width: 100%; box-sizing: border-box; color: #9ca3af; cursor: not-allowed;" disabled>
+
+                        <button type="submit" name="edit_profile" class="btn-generate" style="width: 100%; justify-content: center; padding: 15px; font-size: 16px;">Save Changes</button>
+                    </form>
+                </div>
+            </div>
+
         <?php endif; ?>
     </div>
 
+    <script src="script.js?v=<?php echo time(); ?>"></script>
 </body>
 </html>
