@@ -13,6 +13,7 @@ $user_role = $_SESSION['role'] ?? 'Staff';
     <a href="inventory.php" class="<?= in_array($current_page, ['inventory.php', 'edit_product.php']) ? 'active' : '' ?>">📦 Inventory</a>
     
     <a href="sales.php" class="<?= $current_page == 'sales.php' ? 'active' : '' ?>">🛒 POS Terminal</a>
+    <a href="orders.php" class="<?= $current_page == 'orders.php' ? 'active' : '' ?>">📦 Online Orders</a>
     <a href="customers.php" class="<?= $current_page == 'customers.php' ? 'active' : '' ?>">👥 Customers</a>
     <a href="services.php" class="<?= $current_page == 'services.php' ? 'active' : '' ?>">🔧 Services</a>
     

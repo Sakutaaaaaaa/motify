@@ -12,52 +12,60 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['cart_data'])) {
     $customer_phone = $_POST['customer_phone'];
     $delivery_method = isset($_POST['delivery_method']) ? $_POST['delivery_method'] : 'pickup';
     
-    // Address Handling based on whether they are logged in or guest
+    // Address Handling
     if ($delivery_method === 'delivery') {
         if (isset($_POST['saved_address']) && !empty($_POST['saved_address'])) {
-            // Logged in user chose an address from their Address Book
             $customer_address = trim($_POST['saved_address']);
         } else {
-            // Guest filled out the manual dropdowns
             $region = isset($_POST['region']) ? trim($_POST['region']) : '';
             $province = isset($_POST['province']) ? trim($_POST['province']) : '';
             $city = isset($_POST['city']) ? trim($_POST['city']) : '';
             $brgy = isset($_POST['barangay']) ? trim($_POST['barangay']) : '';
             $postal = isset($_POST['postal_code']) ? trim($_POST['postal_code']) : '';
             $street = isset($_POST['street_name']) ? trim($_POST['street_name']) : '';
-            
             $customer_address = "$street, Brgy. $brgy, $city, $province, $region, $postal";
         }
     } else {
-        $customer_address = ""; // Store Pickup
+        $customer_address = ""; 
     }
     
     if (!empty($cart) && !empty($customer_name)) {
         $conn->begin_transaction();
         try {
-            // A. Auto-Register or Update the Customer
-            if (!empty($customer_phone) && $customer_phone !== "Registered-Account") {
+            $final_customer_id = null;
+
+            if (isset($_SESSION['customer_id'])) {
+                $final_customer_id = $_SESSION['customer_id'];
+            } elseif (!empty($customer_phone) && $customer_phone !== "Registered-Account") {
                 $name_parts = explode(' ', $customer_name, 2);
                 $first_name = $name_parts[0];
                 $last_name = isset($name_parts[1]) ? $name_parts[1] : '';
                 
-                // If delivery, update the temporary address. If pickup, just ensure record exists.
-                $stmt_crm = $conn->prepare("INSERT INTO Customers (first_name, last_name, phone_number, address) 
-                                            VALUES (?, ?, ?, ?) 
-                                            ON DUPLICATE KEY UPDATE address = VALUES(address)");
+                $stmt_crm = $conn->prepare("INSERT INTO Customers (first_name, last_name, phone_number, address) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE address = VALUES(address)");
                 $stmt_crm->bind_param("ssss", $first_name, $last_name, $customer_phone, $customer_address);
                 $stmt_crm->execute();
+                
+                $get_cid = $conn->query("SELECT customer_id FROM Customers WHERE phone_number = '$customer_phone' LIMIT 1");
+                if ($get_cid && $get_cid->num_rows > 0) {
+                    $final_customer_id = $get_cid->fetch_assoc()['customer_id'];
+                } else {
+                    $final_customer_id = $conn->insert_id;
+                }
             }
 
-            // B. Process the Sales and Inventory
             foreach ($cart as $item) {
                 $id = $item['id'];
                 $qty = $item['qty'];
                 $price = $item['price'];
                 $total_amount = $qty * $price;
                 
-                $stmt_sale = $conn->prepare("INSERT INTO Sales (product_id, quantity, total_amount) VALUES (?, ?, ?)");
-                $stmt_sale->bind_param("iid", $id, $qty, $total_amount);
+                if ($final_customer_id) {
+                    $stmt_sale = $conn->prepare("INSERT INTO Sales (product_id, customer_id, quantity, total_amount, order_status) VALUES (?, ?, ?, ?, 'To Ship')");
+                    $stmt_sale->bind_param("iiid", $id, $final_customer_id, $qty, $total_amount);
+                } else {
+                    $stmt_sale = $conn->prepare("INSERT INTO Sales (product_id, quantity, total_amount, order_status) VALUES (?, ?, ?, 'To Ship')");
+                    $stmt_sale->bind_param("iid", $id, $qty, $total_amount);
+                }
                 $stmt_sale->execute();
                 
                 $stmt_inv = $conn->prepare("UPDATE Inventory SET stock_quantity = stock_quantity - ? WHERE product_id = ?");
@@ -66,7 +74,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['cart_data'])) {
             }
             $conn->commit();
 
-            // C. SEND THE NOTIFICATION TO THE RIDER'S BELL (If logged in)
             if (isset($_SESSION['customer_id'])) {
                 $cid = $_SESSION['customer_id'];
                 $notif_title = "Order Placed Successfully";
@@ -76,14 +83,12 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['cart_data'])) {
                 $stmt_notif->execute();
             }
 
-            // D. SEND THE NOTIFICATION TO THE ADMIN/STAFF BELL
             $admin_title = "New Online Order";
             $admin_msg = "A new online order has been placed via " . strtoupper($delivery_method) . ". Check the POS Terminal.";
             $admin_notif_stmt = $conn->prepare("INSERT INTO admin_notifications (title, message) VALUES (?, ?)");
             $admin_notif_stmt->bind_param("ss", $admin_title, $admin_msg);
             $admin_notif_stmt->execute();
             
-            // Dynamic Success Message
             $message = ($delivery_method === 'delivery') 
                 ? "<div style='background:#10b981; color:white; padding:15px; border-radius:8px; margin-bottom:20px; font-weight:bold;'>✅ Order placed! Your items will be delivered to: " . htmlspecialchars($customer_address) . "</div>"
                 : "<div style='background:#10b981; color:white; padding:15px; border-radius:8px; margin-bottom:20px; font-weight:bold;'>✅ Order placed successfully! You can pick it up at the shop.</div>";
@@ -95,40 +100,29 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['cart_data'])) {
     }
 }
 
-// 2. Fetch Only Physical Items in Stock
-$sql = "SELECT p.product_id, p.product_name, p.category, p.selling_price, p.image_path, i.stock_quantity 
+// 2. Fetch Items + NEW RATING COLUMNS
+$sql = "SELECT p.product_id, p.product_name, p.category, p.selling_price, p.image_path, p.rating_sum, p.rating_count, i.stock_quantity 
         FROM Products p
         INNER JOIN Inventory i ON p.product_id = i.product_id
         WHERE i.stock_quantity > 0 AND p.category NOT IN ('Service', 'Services')
         ORDER BY p.product_name ASC";
 $result = $conn->query($sql);
 
-// 3. Fetch Notifications and Addresses if the user is logged in
+// 3. Fetch Notifications & Addresses
 $notifications = [];
 $my_addresses = [];
 $unread_count = 0;
 
 if (isset($_SESSION['customer_id'])) {
     $cid = $_SESSION['customer_id'];
-    
     if (isset($_GET['read_notif'])) {
         $conn->query("UPDATE notifications SET is_read = 1 WHERE customer_id = $cid");
-        header("Location: shop.php");
-        exit();
+        header("Location: shop.php"); exit();
     }
-
     $notif_result = $conn->query("SELECT * FROM notifications WHERE customer_id = $cid ORDER BY created_at DESC LIMIT 5");
-    if ($notif_result) {
-        while($n = $notif_result->fetch_assoc()) {
-            $notifications[] = $n;
-            if ($n['is_read'] == 0) $unread_count++;
-        }
-    }
-
+    if ($notif_result) { while($n = $notif_result->fetch_assoc()) { $notifications[] = $n; if ($n['is_read'] == 0) $unread_count++; } }
     $addr_result = $conn->query("SELECT * FROM customer_addresses WHERE customer_id = $cid ORDER BY created_at DESC");
-    if ($addr_result) {
-        while($a = $addr_result->fetch_assoc()) $my_addresses[] = $a;
-    }
+    if ($addr_result) { while($a = $addr_result->fetch_assoc()) $my_addresses[] = $a; }
 }
 ?>
 
@@ -154,9 +148,7 @@ if (isset($_SESSION['customer_id'])) {
         <div style="display: flex; align-items: center; gap: 20px;">
             <?php if(isset($_SESSION['customer_id'])): ?>
                 <div style="position: relative; display: inline-block; cursor: pointer; padding-top: 5px;" onclick="document.getElementById('notif-dropdown').style.display = document.getElementById('notif-dropdown').style.display === 'block' ? 'none' : 'block';">
-                    
                     <span style="font-size: 28px; display: inline-block; transition: 0.2s;" onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='scale(1)'">🔔</span>
-                    
                     <?php if($unread_count > 0): ?>
                         <span style="position: absolute; top: -2px; right: -5px; background: #ef4444; color: white; border-radius: 50%; padding: 3px 7px; font-size: 11px; font-weight: bold; box-shadow: 0 0 0 3px #111827;"><?php echo $unread_count; ?></span>
                     <?php endif; ?>
@@ -235,6 +227,25 @@ if (isset($_SESSION['customer_id'])) {
                         $category = htmlspecialchars($row['category']);
                         $stock = $row['stock_quantity'];
                         
+                        // NEW DYNAMIC RATING LOGIC
+                        $r_count = isset($row['rating_count']) ? $row['rating_count'] : 0;
+                        $r_sum = isset($row['rating_sum']) ? $row['rating_sum'] : 0;
+                        $avg_rating = ($r_count > 0) ? round($r_sum / $r_count) : 0;
+                        
+                        $stars_html = "";
+                        if ($r_count == 0) {
+                            $stars_html = "<span style='color:#9ca3af; font-size: 12px; font-style: italic;'>No ratings yet</span>";
+                        } else {
+                            for ($i = 1; $i <= 5; $i++) {
+                                if ($i <= $avg_rating) {
+                                    $stars_html .= "⭐"; // Bright yellow star
+                                } else {
+                                    $stars_html .= "<span style='opacity: 0.2; filter: grayscale(100%);'>⭐</span>"; // Dim, gray star
+                                }
+                            }
+                            $stars_html .= " <span style='color:#9ca3af; font-size:12px; margin-left:5px;'>($r_count)</span>";
+                        }
+
                         echo "<div class='product-card'>";
                         echo "  <div class='product-image-wrapper'>";
                         echo "      <div class='badge-container'>";
@@ -251,7 +262,8 @@ if (isset($_SESSION['customer_id'])) {
                         
                         echo "  <div class='card-body'>";
                         echo "      <h3 class='product-title' style='margin:0; font-size:17px;'>$name</h3>";
-                        echo "      <div class='product-meta'><span>⭐⭐⭐⭐⭐ (12)</span><span>Universal Fit</span></div>";
+                        // INJECTED DYNAMIC RATING HERE
+                        echo "      <div class='product-meta'><span style='display:flex; align-items:center; gap:2px;'>$stars_html</span> <span style='margin-left:auto;'>Universal Fit</span></div>";
                         echo "      <div class='product-price' style='color:#ef4444; font-weight:900; font-size:22px; margin-top:auto;'>₱" . number_format($price, 2) . "</div>";
                         echo "      <button type='button' class='btn-generate' style='width:100%; justify-content:center; margin-top:15px; transition:0.3s;' onclick=\"Storefront.addToCart($id, '$safe_name', $price)\">Add to Cart 🛒</button>";
                         echo "  </div>";
@@ -335,12 +347,12 @@ if (isset($_SESSION['customer_id'])) {
                             
                             <div style="display: flex; gap: 10px; margin-bottom: 10px;">
                                 <div style="flex: 1;">
-                                    <select name="region" id="ph-region-shop" style="width:100%; padding:10px; border-radius:4px; border: 1px solid #374151; background:#111827; color:white;" required>
+                                    <select name="region" id="ph-region-shop" style="width:100%; padding:10px; border-radius:4px; border: 1px solid #374151; background:#111827; color:white;">
                                         <option value="" disabled selected>Loading Regions...</option>
                                     </select>
                                 </div>
                                 <div style="flex: 1;">
-                                    <select name="province" id="ph-province-shop" style="width:100%; padding:10px; border-radius:4px; border: 1px solid #374151; background:#111827; color:white;" required>
+                                    <select name="province" id="ph-province-shop" style="width:100%; padding:10px; border-radius:4px; border: 1px solid #374151; background:#111827; color:white;">
                                         <option value="" disabled selected>Select Province</option>
                                     </select>
                                 </div>
@@ -348,12 +360,12 @@ if (isset($_SESSION['customer_id'])) {
                             
                             <div style="display: flex; gap: 10px; margin-bottom: 10px;">
                                 <div style="flex: 1;">
-                                    <select name="city" id="ph-city-shop" style="width:100%; padding:10px; border-radius:4px; border: 1px solid #374151; background:#111827; color:white;" required>
+                                    <select name="city" id="ph-city-shop" style="width:100%; padding:10px; border-radius:4px; border: 1px solid #374151; background:#111827; color:white;">
                                         <option value="" disabled selected>Select City</option>
                                     </select>
                                 </div>
                                 <div style="flex: 1;">
-                                    <select name="barangay" id="ph-barangay-shop" style="width:100%; padding:10px; border-radius:4px; border: 1px solid #374151; background:#111827; color:white;" required>
+                                    <select name="barangay" id="ph-barangay-shop" style="width:100%; padding:10px; border-radius:4px; border: 1px solid #374151; background:#111827; color:white;">
                                         <option value="" disabled selected>Select Barangay</option>
                                     </select>
                                 </div>
@@ -361,10 +373,10 @@ if (isset($_SESSION['customer_id'])) {
 
                             <div style="display: flex; gap: 10px; margin-bottom: 10px;">
                                 <div style="flex: 1;">
-                                    <input type="number" name="postal_code" placeholder="Postal Code" style="width:100%; padding:10px; border-radius:4px; border:none; background:#111827; color:white; border: 1px solid #374151;" required>
+                                    <input type="number" name="postal_code" placeholder="Postal Code" style="width:100%; padding:10px; border-radius:4px; border:none; background:#111827; color:white; border: 1px solid #374151;">
                                 </div>
                                 <div style="flex: 2;">
-                                    <input type="text" name="street_name" placeholder="Street Name, Building No." style="width:100%; padding:10px; border-radius:4px; border:none; background:#111827; color:white; border: 1px solid #374151;" required>
+                                    <input type="text" name="street_name" placeholder="Street Name, Building No." style="width:100%; padding:10px; border-radius:4px; border:none; background:#111827; color:white; border: 1px solid #374151;">
                                 </div>
                             </div>
                         </div>

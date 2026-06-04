@@ -245,7 +245,6 @@ const Storefront = {
         document.getElementById('checkout-form').submit();
     },
 
-    // ... (Your existing filter logic) ...
     updatePriceLabel: function() {
         const label = document.getElementById('priceLabel');
         const range = document.getElementById('priceRange');
@@ -496,6 +495,39 @@ function openEditProfileModal() {
 
 function closeEditProfileModal() {
     var modal = document.getElementById('editProfileModal');
+    if (modal) modal.style.display = 'none';
+}
+
+// =========================================
+// ADDRESS BOOK MODAL LOGIC (account.php)
+// =========================================
+function openAddAddressModal() {
+    var modal = document.getElementById('addAddressModal');
+    if (modal) modal.style.display = 'flex';
+}
+
+function closeAddAddressModal() {
+    var modal = document.getElementById('addAddressModal');
+    if (modal) modal.style.display = 'none';
+}
+
+// =========================================
+// PRODUCT RATING MODAL LOGIC (account.php)
+// =========================================
+function openRateModal(productName) {
+    var display = document.getElementById('rateProductNameDisplay');
+    var input = document.getElementById('rateProductInput');
+    var modal = document.getElementById('rateModal');
+    
+    if (display && input && modal) {
+        display.innerText = productName;
+        input.value = productName;
+        modal.style.display = 'flex';
+    }
+}
+
+function closeRateModal() {
+    var modal = document.getElementById('rateModal');
     if (modal) modal.style.display = 'none';
 }
 

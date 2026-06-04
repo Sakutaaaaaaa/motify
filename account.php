@@ -102,10 +102,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['edit_profile']) && iss
     }
 }
 
-// --- 6. HANDLE ADD ADDRESS (API INTEGRATION) ---
+// --- 6. HANDLE ADD ADDRESS ---
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_address']) && isset($_SESSION['customer_id'])) {
     $label = trim($_POST['address_label']);
-    
     $region = trim($_POST['region']);
     $province = trim($_POST['province']);
     $city = trim($_POST['city']);
@@ -122,11 +121,50 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_address']) && isse
         $stmt->execute();
         $auth_message = "<div style='color:#10b981; background:rgba(16, 185, 129, 0.1); padding:10px; border-radius:6px; margin-bottom:15px; border: 1px solid #10b981;'>✅ Address successfully saved to your Address Book!</div>";
     } catch (Exception $e) {
-        $auth_message = "<div style='color:#ef4444; background:rgba(239, 68, 68, 0.1); padding:10px; border-radius:6px; margin-bottom:15px; border: 1px solid #ef4444;'>❌ Error saving address data. Make sure your database has the 'customer_addresses' table!</div>";
+        $auth_message = "<div style='color:#ef4444; background:rgba(239, 68, 68, 0.1); padding:10px; border-radius:6px; margin-bottom:15px; border: 1px solid #ef4444;'>❌ Error saving address data.</div>";
     }
 }
 
-// --- 7. FETCH ALL DASHBOARD DATA ---
+// --- 7. PROCESS ORDER RECEIVED ---
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['confirm_receipt']) && isset($_SESSION['customer_id'])) {
+    $sales_id = intval($_POST['sales_id']);
+    $p_name = $conn->real_escape_string($_POST['product_name']);
+    $c_name = $_SESSION['customer_name'];
+    $cid = $_SESSION['customer_id'];
+
+    $stmt = $conn->prepare("UPDATE sales SET order_status = 'Received' WHERE sales_id = ? AND customer_id = ?");
+    $stmt->bind_param("ii", $sales_id, $cid);
+    $stmt->execute();
+
+    $admin_title = "Order Received by Customer ✅";
+    $admin_msg = "$c_name has received their order for '$p_name'. Please finalize and mark as Delivered.";
+    $stmt_admin = $conn->prepare("INSERT INTO admin_notifications (title, message) VALUES (?, ?)");
+    $stmt_admin->bind_param("ss", $admin_title, $admin_msg);
+    $stmt_admin->execute();
+
+    $auth_message = "<div style='color:#10b981; background:rgba(16, 185, 129, 0.1); padding:10px; border-radius:6px; margin-bottom:15px; border: 1px solid #10b981;'>✅ You have marked $p_name as received!</div>";
+}
+
+// --- 8. PROCESS PRODUCT RATING ---
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['submit_rating']) && isset($_SESSION['customer_id'])) {
+    $p_name = $_POST['rate_product_name'];
+    $stars = intval($_POST['stars']);
+    $c_name = $_SESSION['customer_name'];
+
+    $stmt_rate = $conn->prepare("UPDATE products SET rating_sum = rating_sum + ?, rating_count = rating_count + 1 WHERE product_name = ?");
+    $stmt_rate->bind_param("is", $stars, $p_name);
+    $stmt_rate->execute();
+
+    $admin_title = "New Product Rating ⭐";
+    $admin_msg = "$c_name just rated $p_name with $stars/5 Stars!";
+    $stmt_admin_notif = $conn->prepare("INSERT INTO admin_notifications (title, message) VALUES (?, ?)");
+    $stmt_admin_notif->bind_param("ss", $admin_title, $admin_msg);
+    $stmt_admin_notif->execute();
+
+    $auth_message = "<div style='color:#10b981; background:rgba(16, 185, 129, 0.1); padding:10px; border-radius:6px; margin-bottom:15px; border: 1px solid #10b981;'>✅ Thank you for rating the $p_name!</div>";
+}
+
+// --- 9. FETCH ALL DASHBOARD DATA ---
 $my_bikes = [];
 $user_data = [];
 $notifications = [];
@@ -161,7 +199,7 @@ if (isset($_SESSION['customer_id'])) {
         }
     }
 
-    $order_result = $conn->query("SELECT s.transaction_date, s.total_amount, s.quantity, p.product_name 
+    $order_result = $conn->query("SELECT s.sales_id, s.transaction_date, s.total_amount, s.quantity, s.order_status, p.product_id, p.product_name 
                                   FROM sales s 
                                   JOIN products p ON s.product_id = p.product_id 
                                   WHERE s.customer_id = $cid 
@@ -179,11 +217,6 @@ if (isset($_SESSION['customer_id'])) {
     <title>Motify Garage - Rider Portal</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
-    
-    <script>
-        function openAddAddressModal() { document.getElementById('addAddressModal').style.display = 'flex'; }
-        function closeAddAddressModal() { document.getElementById('addAddressModal').style.display = 'none'; }
-    </script>
 </head>
 <body class="store-body">
 
@@ -358,6 +391,7 @@ if (isset($_SESSION['customer_id'])) {
 
                     <div style="background: #1f2937; border: 1px solid #374151; border-radius: 12px; padding: 25px; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3);">
                         <h3 style="margin: 0 0 20px 0; color: white; border-bottom: 1px solid #374151; padding-bottom: 15px;">📦 Recent Orders</h3>
+                        
                         <?php if (empty($my_orders)): ?>
                             <div style="text-align: center; padding: 30px 0;">
                                 <div style="font-size: 40px; margin-bottom: 15px; opacity: 0.3;">🛍️</div>
@@ -366,15 +400,42 @@ if (isset($_SESSION['customer_id'])) {
                             </div>
                         <?php else: ?>
                             <div style="display: flex; flex-direction: column; gap: 12px;">
-                                <?php foreach($my_orders as $order): ?>
-                                    <div style="display: flex; justify-content: space-between; align-items: center; background: #111827; padding: 15px; border-radius: 8px; border-left: 4px solid #3b82f6;">
-                                        <div>
-                                            <div style="font-weight: bold; color: white; font-size: 14px;"><?php echo htmlspecialchars($order['product_name']); ?> (x<?php echo $order['quantity']; ?>)</div>
-                                            <div style="font-size: 12px; color: #9ca3af; margin-top: 4px;"><?php echo date("M d, Y • h:i A", strtotime($order['transaction_date'])); ?></div>
+                                <?php foreach($my_orders as $order): 
+                                    $o_status = isset($order['order_status']) ? $order['order_status'] : 'To Ship';
+                                    
+                                    $s_color = '#f59e0b'; $s_bg = 'rgba(245, 158, 11, 0.1)';
+                                    if ($o_status == 'Shipped') { $s_color = '#3b82f6'; $s_bg = 'rgba(59, 130, 246, 0.1)'; }
+                                    if ($o_status == 'Received') { $s_color = '#8b5cf6'; $s_bg = 'rgba(139, 92, 246, 0.1)'; }
+                                    if ($o_status == 'Delivered') { $s_color = '#10b981'; $s_bg = 'rgba(16, 185, 129, 0.1)'; }
+                                ?>
+                                    <div style="background: #111827; padding: 15px; border-radius: 8px; border-left: 4px solid <?php echo $s_color; ?>;">
+                                        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                                            <div>
+                                                <div style="font-weight: bold; color: white; font-size: 15px;"><?php echo htmlspecialchars($order['product_name']); ?> (x<?php echo $order['quantity']; ?>)</div>
+                                                <div style="font-size: 12px; color: #9ca3af; margin-top: 4px;"><?php echo date("M d, Y • h:i A", strtotime($order['transaction_date'])); ?></div>
+                                            </div>
+                                            <div style="text-align: right;">
+                                                <div style="color: <?php echo $s_color; ?>; font-weight: 900; font-size: 11px; background: <?php echo $s_bg; ?>; padding: 4px 10px; border-radius: 20px; display: inline-block; margin-bottom: 6px;"><?php echo $o_status; ?></div>
+                                                <div style="color: white; font-weight: bold; font-size: 14px;">₱<?php echo number_format($order['total_amount'], 2); ?></div>
+                                            </div>
                                         </div>
-                                        <div style="text-align: right;">
-                                            <div style="color: white; font-weight: bold; font-size: 14px;">₱<?php echo number_format($order['total_amount'], 2); ?></div>
-                                        </div>
+                                        
+                                        <?php if ($o_status == 'Shipped'): ?>
+                                            <form method="POST" action="" style="display: flex; gap: 10px; border-top: 1px dashed #374151; padding-top: 12px; margin-top: 12px;">
+                                                <input type="hidden" name="sales_id" value="<?php echo $order['sales_id']; ?>">
+                                                <input type="hidden" name="product_name" value="<?php echo htmlspecialchars($order['product_name']); ?>">
+                                                <button type="submit" name="confirm_receipt" style="flex: 1; background: #3b82f6; border: none; color: white; padding: 8px; border-radius: 4px; font-size: 12px; font-weight: bold; cursor: pointer; transition: 0.2s;" onmouseover="this.style.background='#2563eb'" onmouseout="this.style.background='#3b82f6'">Order Received ✅</button>
+                                            </form>
+                                        <?php elseif ($o_status == 'Received'): ?>
+                                            <div style="margin-top: 12px; font-size: 12px; color: #9ca3af; font-style: italic; border-top: 1px dashed #374151; padding-top: 12px;">
+                                                Waiting for admin to finalize delivery...
+                                            </div>
+                                        <?php elseif ($o_status == 'Delivered'): ?>
+                                            <div style="display: flex; gap: 10px; border-top: 1px dashed #374151; padding-top: 12px; margin-top: 12px;">
+                                                <button type="button" onclick="openRateModal('<?php echo addslashes($order['product_name']); ?>')" style="flex: 1; background: transparent; border: 1px solid #374151; color: #f59e0b; padding: 8px; border-radius: 4px; font-size: 12px; font-weight: bold; cursor: pointer; transition: 0.2s;" onmouseover="this.style.background='rgba(245, 158, 11, 0.1)'; this.style.borderColor='#f59e0b';" onmouseout="this.style.background='transparent'; this.style.borderColor='#374151';">Rate ⭐</button>
+                                                <a href="shop.php" style="flex: 1; text-align: center; background: rgba(59, 130, 246, 0.1); border: 1px solid #3b82f6; color: #3b82f6; padding: 8px; border-radius: 4px; font-size: 12px; font-weight: bold; text-decoration: none; transition: 0.2s;" onmouseover="this.style.background='rgba(59, 130, 246, 0.2)'" onmouseout="this.style.background='rgba(59, 130, 246, 0.1)'">Buy Again 🛒</a>
+                                            </div>
+                                        <?php endif; ?>
                                     </div>
                                 <?php endforeach; ?>
                             </div>
@@ -419,14 +480,12 @@ if (isset($_SESSION['customer_id'])) {
                 <div class="modal-content">
                     <span class="close-btn" onclick="closeAddAddressModal()">&times;</span>
                     <h2 style="color: white; margin-top: 0; border-bottom: 1px solid #374151; padding-bottom: 15px;">📍 Add Delivery Address</h2>
-                    
                     <form method="POST" action="">
                         <label style="color: #9ca3af; font-size: 13px; margin-bottom: 8px; display: block; font-weight: bold;">Label</label>
                         <select name="address_label" class="auth-input" style="background:#111827; border:1px solid #374151; margin-bottom: 20px; width: 100%; box-sizing: border-box;" required>
                             <option value="Home">🏠 Home</option>
                             <option value="Office">🏢 Office</option>
                         </select>
-
                         <div style="display: flex; gap: 15px; margin-bottom: 15px;">
                             <div style="flex: 1;">
                                 <label style="color: #9ca3af; font-size: 13px; margin-bottom: 8px; display: block; font-weight: bold;">Region *</label>
@@ -441,7 +500,6 @@ if (isset($_SESSION['customer_id'])) {
                                 </select>
                             </div>
                         </div>
-
                         <div style="display: flex; gap: 15px; margin-bottom: 15px;">
                             <div style="flex: 1;">
                                 <label style="color: #9ca3af; font-size: 13px; margin-bottom: 8px; display: block; font-weight: bold;">City / Municipality *</label>
@@ -456,7 +514,6 @@ if (isset($_SESSION['customer_id'])) {
                                 </select>
                             </div>
                         </div>
-
                         <div style="display: flex; gap: 15px; margin-bottom: 25px;">
                             <div style="flex: 1;">
                                 <label style="color: #9ca3af; font-size: 13px; margin-bottom: 8px; display: block; font-weight: bold;">Postal Code *</label>
@@ -467,7 +524,6 @@ if (isset($_SESSION['customer_id'])) {
                                 <input type="text" name="street_name" class="auth-input" placeholder="e.g. 123 Main St., Blk 4" style="background:#111827; border:1px solid #374151; width: 100%; box-sizing: border-box;" required>
                             </div>
                         </div>
-
                         <button type="submit" name="add_address" class="btn-generate" style="width: 100%; justify-content: center; padding: 15px; font-size: 16px; background: #3b82f6;">Save Address to Book</button>
                     </form>
                 </div>
@@ -509,6 +565,28 @@ if (isset($_SESSION['customer_id'])) {
                         <label style="color: #9ca3af; font-size: 13px; margin-bottom: 8px; display: block; font-weight: bold;">Email (Read Only)</label>
                         <input type="text" value="<?php echo htmlspecialchars($user_data['email'] ?? ''); ?>" class="auth-input" style="background:#374151; border:1px solid #374151; margin-bottom: 25px; width: 100%; box-sizing: border-box; color: #9ca3af; cursor: not-allowed;" disabled>
                         <button type="submit" name="edit_profile" class="btn-generate" style="width: 100%; justify-content: center; padding: 15px; font-size: 16px;">Save Changes</button>
+                    </form>
+                </div>
+            </div>
+
+            <div id="rateModal" class="modal-overlay">
+                <div class="modal-content" style="max-width: 400px; text-align: center;">
+                    <span class="close-btn" onclick="closeRateModal()">&times;</span>
+                    <h2 style="color: white; margin-top: 0; margin-bottom: 5px;">Rate Product ⭐</h2>
+                    <p id="rateProductNameDisplay" style="color: #9ca3af; font-size: 14px; margin-bottom: 20px;"></p>
+                    
+                    <form method="POST" action="">
+                        <input type="hidden" name="rate_product_name" id="rateProductInput">
+                        
+                        <select name="stars" class="auth-input" style="background:#111827; border:1px solid #374151; margin-bottom: 20px; width: 100%; box-sizing: border-box; text-align: center; font-size: 18px;" required>
+                            <option value="5">⭐⭐⭐⭐⭐ Excellent!</option>
+                            <option value="4">⭐⭐⭐⭐ Good</option>
+                            <option value="3">⭐⭐⭐ Average</option>
+                            <option value="2">⭐⭐ Poor</option>
+                            <option value="1">⭐ Terrible</option>
+                        </select>
+
+                        <button type="submit" name="submit_rating" class="btn-generate" style="width: 100%; justify-content: center; padding: 12px; font-size: 15px; background: #f59e0b; color: white;">Submit Rating</button>
                     </form>
                 </div>
             </div>
