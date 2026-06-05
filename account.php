@@ -4,15 +4,10 @@ session_start();
 require_once 'db_connection.php';
 
 // === 🚀 SILENT DATABASE AUTO-REPAIR SCRIPT 🚀 ===
-// 1. Removes the strict ENUM lock that caused the blank "-" status
-$conn->query("ALTER TABLE service_bookings MODIFY COLUMN booking_status VARCHAR(50) DEFAULT 'Pending'");
-// 2. Creates a dedicated rating column just for services if it doesn't exist
 $check_rating_col = $conn->query("SHOW COLUMNS FROM service_bookings LIKE 'service_rating'");
 if ($check_rating_col && $check_rating_col->num_rows == 0) {
     $conn->query("ALTER TABLE service_bookings ADD COLUMN service_rating INT DEFAULT 0");
 }
-// 3. Magically repairs your broken/blank booking back to "Completed" so you can rate it!
-$conn->query("UPDATE service_bookings SET booking_status = 'Completed' WHERE booking_status = '' OR booking_status IS NULL");
 // ================================================
 
 $auth_message = "";
@@ -181,19 +176,18 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['submit_rating']) && is
     $auth_message = "<div style='color:#10b981; background:rgba(16, 185, 129, 0.1); padding:10px; border-radius:6px; margin-bottom:15px; border: 1px solid #10b981;'>✅ Thank you for rating the $p_name! Your order is now completed.</div>";
 }
 
-// --- NEW 8b: PROCESS SERVICE RATING (BULLETPROOF INDEPENDENT FIX) ---
+// --- 8b: PROCESS SERVICE RATING ---
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['submit_service_rating']) && isset($_SESSION['customer_id'])) {
     $s_name = trim($_POST['rate_service_name']);
+    $booking_id = intval($_POST['rate_booking_id']); 
     $stars = intval($_POST['stars']);
     $cid = $_SESSION['customer_id'];
     $c_name = $_SESSION['customer_name'];
 
-    // Update the rating DIRECTLY on the booking row! Bypasses the products table entirely.
-    $stmt_rate = $conn->prepare("UPDATE service_bookings SET booking_status = 'Rated', service_rating = ? WHERE customer_id = ? AND service_type = ? AND booking_status = 'Completed'");
-    $stmt_rate->bind_param("iis", $stars, $cid, $s_name);
+    $stmt_rate = $conn->prepare("UPDATE service_bookings SET booking_status = 'Rated', service_rating = ? WHERE id = ? OR booking_id = ? OR (customer_id = ? AND service_type = ?)");
+    $stmt_rate->bind_param("iiiis", $stars, $booking_id, $booking_id, $cid, $s_name);
     $stmt_rate->execute();
 
-    // Notify Admin
     $admin_title = "New Service Rating ⭐";
     $admin_msg = "$c_name just rated their service ($s_name) with $stars/5 Stars!";
     $stmt_admin_notif = $conn->prepare("INSERT INTO admin_notifications (title, message) VALUES (?, ?)");
@@ -203,7 +197,61 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['submit_service_rating'
     $auth_message = "<div style='color:#10b981; background:rgba(16, 185, 129, 0.1); padding:10px; border-radius:6px; margin-bottom:15px; border: 1px solid #10b981;'>✅ Thank you for rating your service experience!</div>";
 }
 
-// --- 9. FETCH ALL DASHBOARD DATA ---
+// --- 10. HANDLE REPLACEMENT REQUEST ---
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['request_replacement']) && isset($_SESSION['customer_id'])) {
+    $sales_id = intval($_POST['replace_sales_id']);
+    $p_name = $_POST['replace_product_name'];
+    $reason = $conn->real_escape_string($_POST['reason']);
+    $cid = $_SESSION['customer_id'];
+    $c_name = $_SESSION['customer_name'];
+
+    $target_dir = "uploads/returns/";
+    if (!file_exists($target_dir)) { mkdir($target_dir, 0777, true); }
+    
+    $file_name = time() . "_" . basename($_FILES["proof_image"]["name"]);
+    $target_file = $target_dir . $file_name;
+    
+    if (move_uploaded_file($_FILES["proof_image"]["tmp_name"], $target_file)) {
+        
+        $conn->query("UPDATE sales SET order_status = 'Replacement Pending' WHERE sales_id = $sales_id");
+        
+        $stmt = $conn->prepare("INSERT INTO product_returns (sales_id, customer_id, reason, proof_image) VALUES (?, ?, ?, ?)");
+        $stmt->bind_param("iiss", $sales_id, $cid, $reason, $target_file);
+        $stmt->execute();
+
+        $admin_msg = "$c_name requested a replacement for '$p_name'. Please review the proof.";
+        $stmt_admin = $conn->prepare("INSERT INTO admin_notifications (title, message) VALUES ('Replacement Request 🔄', ?)");
+        $stmt_admin->bind_param("s", $admin_msg);
+        $stmt_admin->execute();
+
+        $auth_message = "<div style='color:#10b981; background:rgba(16, 185, 129, 0.1); padding:10px; border-radius:6px; margin-bottom:15px; border: 1px solid #10b981;'>✅ Replacement request submitted. Please wait for admin approval.</div>";
+    } else {
+        $auth_message = "<div style='color:#ef4444; background:rgba(239, 68, 68, 0.1); padding:10px; border-radius:6px; margin-bottom:15px; border: 1px solid #ef4444;'>❌ Error uploading proof image.</div>";
+    }
+}
+
+// --- 11. NEW: PROCESS REPLACEMENT RECEIVED ---
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['confirm_replacement_receipt']) && isset($_SESSION['customer_id'])) {
+    $sales_id = intval($_POST['sales_id']);
+    $p_name = $conn->real_escape_string($_POST['product_name']);
+    $c_name = $_SESSION['customer_name'];
+    $cid = $_SESSION['customer_id'];
+
+    // Pushing the status to 'Delivered' automatically brings back the Rate button!
+    $stmt = $conn->prepare("UPDATE sales SET order_status = 'Delivered' WHERE sales_id = ? AND customer_id = ?");
+    $stmt->bind_param("ii", $sales_id, $cid);
+    $stmt->execute();
+
+    $admin_title = "Replacement Received ✅";
+    $admin_msg = "$c_name has received their replacement for '$p_name'.";
+    $stmt_admin = $conn->prepare("INSERT INTO admin_notifications (title, message) VALUES (?, ?)");
+    $stmt_admin->bind_param("ss", $admin_title, $admin_msg);
+    $stmt_admin->execute();
+
+    $auth_message = "<div style='color:#10b981; background:rgba(16, 185, 129, 0.1); padding:10px; border-radius:6px; margin-bottom:15px; border: 1px solid #10b981;'>✅ You marked the replacement for $p_name as received! You can now rate it.</div>";
+}
+
+// --- 12. FETCH ALL DASHBOARD DATA ---
 $my_bikes = [];
 $user_data = [];
 $notifications = [];
@@ -446,6 +494,8 @@ if (isset($_SESSION['customer_id'])) {
                                     if ($o_status == 'Shipped') { $s_color = '#3b82f6'; $s_bg = 'rgba(59, 130, 246, 0.1)'; }
                                     if ($o_status == 'Received') { $s_color = '#8b5cf6'; $s_bg = 'rgba(139, 92, 246, 0.1)'; }
                                     if ($o_status == 'Delivered' || $o_status == 'Completed') { $s_color = '#10b981'; $s_bg = 'rgba(16, 185, 129, 0.1)'; }
+                                    if ($o_status == 'Replacement Pending') { $s_color = '#f59e0b'; $s_bg = 'rgba(245, 158, 11, 0.1)'; }
+                                    if ($o_status == 'Replacement Approved') { $s_color = '#10b981'; $s_bg = 'rgba(16, 185, 129, 0.1)'; }
                                 ?>
                                     <div style="background: #111827; padding: 15px; border-radius: 8px; border-left: 4px solid <?php echo $s_color; ?>;">
                                         <div style="display: flex; justify-content: space-between; align-items: flex-start;">
@@ -469,17 +519,36 @@ if (isset($_SESSION['customer_id'])) {
                                             <div style="margin-top: 12px; font-size: 12px; color: #9ca3af; font-style: italic; border-top: 1px dashed #374151; padding-top: 12px;">
                                                 Waiting for admin to finalize delivery...
                                             </div>
-                                        <?php elseif ($o_status == 'Delivered'): ?>
+                                        <?php elseif ($o_status == 'Delivered' || $o_status == 'Completed'): ?>
                                             <div style="display: flex; gap: 10px; border-top: 1px dashed #374151; padding-top: 12px; margin-top: 12px;">
-                                                <button type="button" onclick="openItemRateModal('<?php echo addslashes($order['product_name']); ?>', <?php echo $order['sales_id']; ?>)" style="flex: 1; background: transparent; border: 1px solid #374151; color: #f59e0b; padding: 8px; border-radius: 4px; font-size: 12px; font-weight: bold; cursor: pointer; transition: 0.2s;" onmouseover="this.style.background='rgba(245, 158, 11, 0.1)'; this.style.borderColor='#f59e0b';" onmouseout="this.style.background='transparent'; this.style.borderColor='#374151';">Rate ⭐</button>
+                                                <?php if ($o_status == 'Delivered'): ?>
+                                                    <button type="button" onclick="openItemRateModal('<?php echo addslashes($order['product_name']); ?>', <?php echo $order['sales_id']; ?>)" style="flex: 1; background: transparent; border: 1px solid #374151; color: #f59e0b; padding: 8px; border-radius: 4px; font-size: 12px; font-weight: bold; cursor: pointer; transition: 0.2s;" onmouseover="this.style.background='rgba(245, 158, 11, 0.1)'; this.style.borderColor='#f59e0b';" onmouseout="this.style.background='transparent'; this.style.borderColor='#374151';">Rate ⭐</button>
+                                                <?php else: ?>
+                                                    <button type="button" disabled style="flex: 1; background: rgba(16, 185, 129, 0.05); border: 1px solid #10b981; color: #10b981; padding: 8px; border-radius: 4px; font-size: 12px; font-weight: bold; cursor: default;">Completed ✅</button>
+                                                <?php endif; ?>
+                                                
                                                 <a href="shop.php" style="flex: 1; text-align: center; background: rgba(59, 130, 246, 0.1); border: 1px solid #3b82f6; color: #3b82f6; padding: 8px; border-radius: 4px; font-size: 12px; font-weight: bold; text-decoration: none; transition: 0.2s;" onmouseover="this.style.background='rgba(59, 130, 246, 0.2)'" onmouseout="this.style.background='rgba(59, 130, 246, 0.1)'">Buy Again 🛒</a>
+                                                
+                                                <button type="button" onclick="openReplaceModal('<?php echo addslashes($order['product_name']); ?>', <?php echo $order['sales_id']; ?>)" style="flex: 1; background: transparent; border: 1px solid #ef4444; color: #ef4444; padding: 8px; border-radius: 4px; font-size: 12px; font-weight: bold; cursor: pointer; transition: 0.2s;" onmouseover="this.style.background='rgba(239, 68, 68, 0.1)'" onmouseout="this.style.background='transparent'">Replace 🔄</button>
                                             </div>
-                                        <?php elseif ($o_status == 'Completed'): ?>
-                                            <div style="display: flex; gap: 10px; border-top: 1px dashed #374151; padding-top: 12px; margin-top: 12px;">
-                                                <button type="button" disabled style="flex: 1; background: rgba(16, 185, 129, 0.05); border: 1px solid #10b981; color: #10b981; padding: 8px; border-radius: 4px; font-size: 12px; font-weight: bold; cursor: default;">Order Completed ✅</button>
-                                                <a href="shop.php" style="flex: 1; text-align: center; background: rgba(59, 130, 246, 0.1); border: 1px solid #3b82f6; color: #3b82f6; padding: 8px; border-radius: 4px; font-size: 12px; font-weight: bold; text-decoration: none; transition: 0.2s;" onmouseover="this.style.background='rgba(59, 130, 246, 0.2)'" onmouseout="this.style.background='rgba(59, 130, 246, 0.1)'">Buy Again 🛒</a>
+                                        <?php elseif ($o_status == 'Replacement Pending'): ?>
+                                            <div style="margin-top: 12px; font-size: 12px; color: #f59e0b; font-weight: bold; border-top: 1px dashed #374151; padding-top: 12px;">
+                                                ⏳ Your replacement request is pending admin review...
+                                            </div>
+                                        
+                                        <?php elseif ($o_status == 'Replacement Approved'): ?>
+                                            <div style="display: flex; flex-direction: column; gap: 10px; border-top: 1px dashed #374151; padding-top: 12px; margin-top: 12px;">
+                                                <div style="font-size: 12px; color: #10b981; font-weight: bold;">
+                                                    🚚 Approved! The courier is delivering your replacement.
+                                                </div>
+                                                <form method="POST" action="" style="display: flex; width: 100%;">
+                                                    <input type="hidden" name="sales_id" value="<?php echo $order['sales_id']; ?>">
+                                                    <input type="hidden" name="product_name" value="<?php echo htmlspecialchars($order['product_name']); ?>">
+                                                    <button type="submit" name="confirm_replacement_receipt" style="width: 100%; background: #10b981; border: none; color: white; padding: 8px; border-radius: 4px; font-size: 12px; font-weight: bold; cursor: pointer; transition: 0.2s;" onmouseover="this.style.background='#059669'" onmouseout="this.style.background='#10b981'">Replacement Received ✅</button>
+                                                </form>
                                             </div>
                                         <?php endif; ?>
+                                        
                                     </div>
                                 <?php endforeach; ?>
                             </div>
@@ -536,7 +605,6 @@ if (isset($_SESSION['customer_id'])) {
                 </div>
             </div>
 
-            <!-- Existing Modals -->
             <div id="addAddressModal" class="modal-overlay">
                 <div class="modal-content">
                     <span class="close-btn" onclick="closeAddAddressModal()">&times;</span>
@@ -630,7 +698,6 @@ if (isset($_SESSION['customer_id'])) {
                 </div>
             </div>
 
-            <!-- Product Rating Modal -->
             <div id="rateModal" class="modal-overlay">
                 <div class="modal-content" style="max-width: 400px; text-align: center;">
                     <span class="close-btn" onclick="closeRateModal()">&times;</span>
@@ -654,7 +721,6 @@ if (isset($_SESSION['customer_id'])) {
                 </div>
             </div>
 
-            <!-- Service Rating Modal -->
             <div id="rateServiceModal" class="modal-overlay">
                 <div class="modal-content" style="max-width: 400px; text-align: center;">
                     <span class="close-btn" onclick="closeServiceRateModal()">&times;</span>
@@ -674,6 +740,26 @@ if (isset($_SESSION['customer_id'])) {
                         </select>
 
                         <button type="submit" name="submit_service_rating" class="btn-generate" style="width: 100%; justify-content: center; padding: 12px; font-size: 15px; background: #3b82f6; color: white;">Submit Rating</button>
+                    </form>
+                </div>
+            </div>
+
+            <div id="replaceModal" class="modal-overlay">
+                <div class="modal-content" style="max-width: 400px; text-align: center;">
+                    <span class="close-btn" onclick="closeReplaceModal()">&times;</span>
+                    <h2 style="color: white; margin-top: 0; margin-bottom: 5px;">Request Replacement 🔄</h2>
+                    <p id="replaceProductNameDisplay" style="color: #9ca3af; font-size: 14px; margin-bottom: 20px;"></p>
+                    
+                    <form method="POST" action="" enctype="multipart/form-data">
+                        <input type="hidden" name="replace_product_name" id="replaceProductInput">
+                        <input type="hidden" name="replace_sales_id" id="replaceSalesIdInput">
+                        
+                        <textarea name="reason" class="auth-input" placeholder="Please explain what is damaged or missing..." style="background:#111827; border:1px solid #374151; margin-bottom: 15px; width: 100%; box-sizing: border-box; resize: none; height: 80px;" required></textarea>
+                        
+                        <label style="color: #9ca3af; font-size: 13px; margin-bottom: 8px; display: block; font-weight: bold; text-align: left;">Upload Proof (Image):</label>
+                        <input type="file" name="proof_image" accept="image/*" class="auth-input" style="background:#111827; border:1px solid #374151; margin-bottom: 20px; width: 100%; box-sizing: border-box;" required>
+
+                        <button type="submit" name="request_replacement" class="btn-generate" style="width: 100%; justify-content: center; padding: 12px; font-size: 15px; background: #ef4444; color: white;">Submit Request</button>
                     </form>
                 </div>
             </div>

@@ -22,6 +22,7 @@ if ($admin_notif_q) {
     
     <a href="sales.php" class="<?= $current_page == 'sales.php' ? 'active' : '' ?>">🛒 POS Terminal</a>
     <a href="orders.php" class="<?= $current_page == 'orders.php' ? 'active' : '' ?>">📦 Online Orders</a>
+    <a href="replacements.php" class="<?= $current_page == 'replacements.php' ? 'active' : '' ?>">🔄 Replacements</a>
     <a href="customers.php" class="<?= $current_page == 'customers.php' ? 'active' : '' ?>">👥 Customers</a>
     <a href="services.php" class="<?= $current_page == 'services.php' ? 'active' : '' ?>">🔧 Services</a>
     

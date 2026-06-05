@@ -207,6 +207,25 @@ const POSTerminal = {
 const Storefront = {
     cart: {},
 
+    // 1. NEW: Load cart from the browser's permanent memory
+    initCart: function() {
+        let savedCart = localStorage.getItem('motify_store_cart');
+        if (savedCart) {
+            this.cart = JSON.parse(savedCart);
+        } else {
+            this.cart = {};
+        }
+        // If we are on a page with a cart display, render it immediately
+        if (document.getElementById('cart-items')) {
+            this.renderCart();
+        }
+    },
+
+    // 2. NEW: Save cart to the browser's permanent memory
+    saveCart: function() {
+        localStorage.setItem('motify_store_cart', JSON.stringify(this.cart));
+    },
+
     addToCart: function(id, name, price) {
         if (this.cart[id]) { 
             this.cart[id].qty++; 
@@ -214,7 +233,8 @@ const Storefront = {
             this.cart[id] = { id: id, name: name, price: price, qty: 1 }; 
         }
         
-        alert("✅ Added " + name + " to your cart!"); // User feedback!
+        this.saveCart(); // Save immediately after adding
+        alert("✅ Added " + name + " to your cart!"); 
         this.renderCart();
     },
 
@@ -224,6 +244,7 @@ const Storefront = {
             if (this.cart[id].qty <= 0) {
                 delete this.cart[id];
             }
+            this.saveCart(); // Save immediately after changing quantity
             this.renderCart();
         }
     },
@@ -234,7 +255,7 @@ const Storefront = {
         const cartReceipt = document.getElementById('cart-receipt');
         const subtotalDisplay = document.getElementById('cart-subtotal-display');
         
-        if (!checkoutDetails || !cartReceipt) return;
+        if (!checkoutDetails || !cartReceipt || !cartDiv) return;
 
         let subtotal = 0;
         
@@ -284,6 +305,10 @@ const Storefront = {
     processOnlineOrder: function() {
         const cartArray = Object.values(this.cart);
         document.getElementById('cart-data-input').value = JSON.stringify(cartArray);
+        
+        // 3. NEW: Clear the cart from memory because the checkout was successful!
+        localStorage.removeItem('motify_store_cart'); 
+        
         document.getElementById('checkout-form').submit();
     },
 
@@ -345,18 +370,15 @@ const Storefront = {
             setTimeout(() => button.style.transform = 'scale(1)', 150);
         }
     },
+    
     toggleWishlistView: function(event) {
         if(event) event.preventDefault();
 
         const products = document.querySelectorAll('.product-card');
-        
-        // Toggle the mode on or off
         this.wishlistMode = !this.wishlistMode;
-
         const wishlistNav = document.getElementById('nav-wishlist');
 
         if (this.wishlistMode) {
-            // ON: Hide everything except the cards with an active heart
             products.forEach(card => {
                 const heart = card.querySelector('.btn-wishlist');
                 if (heart && heart.classList.contains('active')) {
@@ -366,13 +388,11 @@ const Storefront = {
                 }
             });
             
-            // Update the Navbar text to show it's active
             if(wishlistNav) {
                 wishlistNav.style.color = '#ef4444';
                 wishlistNav.innerText = 'Close Wishlist ❌';
             }
         } else {
-            // OFF: Reset the text and run the normal filter to show items again
             if(wishlistNav) {
                 wishlistNav.style.color = '#f3f4f6';
                 wishlistNav.innerText = 'Wishlist ❤️';
@@ -380,7 +400,14 @@ const Storefront = {
             this.filterProducts(); 
         }
     }
-}
+};
+
+// 4. NEW: Auto-Load the cart the exact second the web page loads
+document.addEventListener("DOMContentLoaded", function() {
+    if (typeof Storefront !== 'undefined') {
+        Storefront.initCart();
+    }
+});
 
 
 // =========================================
@@ -657,6 +684,24 @@ document.addEventListener("DOMContentLoaded", function() {
         });
     }
 });
+
+// =========================================
+// REPLACEMENT MODAL LOGIC (account.php)
+// =========================================
+function openReplaceModal(productName, salesId) {
+    const modal = document.getElementById('replaceModal');
+    if (modal) {
+        modal.style.display = 'flex';
+        document.getElementById('replaceProductNameDisplay').innerText = productName;
+        document.getElementById('replaceProductInput').value = productName;
+        document.getElementById('replaceSalesIdInput').value = salesId;
+    }
+}
+
+function closeReplaceModal() {
+    const modal = document.getElementById('replaceModal');
+    if (modal) modal.style.display = 'none';
+}
 
 // =========================================
 // PHILIPPINE ADDRESS API (PSGC) INTEGRATION
