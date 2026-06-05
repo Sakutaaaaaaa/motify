@@ -41,13 +41,13 @@ if (isset($_SESSION['customer_id'])) {
         
         <div style="display: flex; align-items: center; gap: 20px;">
             <?php if(isset($_SESSION['customer_id'])): ?>
-                <div style="position: relative; display: inline-block; cursor: pointer;" onclick="document.getElementById('notif-dropdown').style.display = document.getElementById('notif-dropdown').style.display === 'block' ? 'none' : 'block';">
-                    🔔 <span style="color: #9ca3af; font-size: 14px; font-weight: bold;"></span>
+                <div style="position: relative; display: inline-block; cursor: pointer; padding-top: 5px;" onclick="document.getElementById('notif-dropdown').style.display = document.getElementById('notif-dropdown').style.display === 'block' ? 'none' : 'block';">
+                    <span style="font-size: 28px; display: inline-block; transition: 0.2s;" onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='scale(1)'">🔔</span>
                     <?php if($unread_count > 0): ?>
-                        <span style="position: absolute; top: -8px; right: -8px; background: #ef4444; color: white; border-radius: 50%; padding: 2px 6px; font-size: 10px; font-weight: bold;"><?php echo $unread_count; ?></span>
+                        <span style="position: absolute; top: -2px; right: -5px; background: #ef4444; color: white; border-radius: 50%; padding: 3px 7px; font-size: 11px; font-weight: bold; box-shadow: 0 0 0 3px #111827;"><?php echo $unread_count; ?></span>
                     <?php endif; ?>
                     
-                    <div id="notif-dropdown" style="display: none; position: absolute; top: 30px; right: 0; left: auto; width: 300px; background: #1f2937; border: 1px solid #374151; border-radius: 8px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.5); z-index: 100; text-align: left;">
+                    <div id="notif-dropdown" style="display: none; position: absolute; top: 45px; right: 0; left: auto; width: 300px; background: #1f2937; border: 1px solid #374151; border-radius: 8px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.5); z-index: 100; text-align: left;">
                         <div style="padding: 10px 15px; border-bottom: 1px solid #374151; display: flex; justify-content: space-between; align-items: center;">
                             <strong style="color: white;">Recent Notifications</strong>
                             <?php if($unread_count > 0): ?>
@@ -73,13 +73,14 @@ if (isset($_SESSION['customer_id'])) {
         </div>
     </header>
 
-    <div class="store-hero-banner" style="padding: 180px 20px; min-height: 70vh; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;">
+    <div class="store-hero-banner" style="padding: 150px 20px; min-height: 65vh; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;">
         <div class="store-hero-content">
             <h1 style="font-size: 5rem; margin-bottom: 15px;">Welcome to <span>Motify Garage</span></h1>
-            <p style="font-size: 1.5rem; margin-bottom: 40px; color: #d1d5db;">Your ultimate destination for premium motorcycle parts and expert services.</p>
-            <a href="shop.php" style="background: #ef4444; color: white; padding: 18px 40px; text-decoration: none; font-weight: 900; border-radius: 6px; font-size: 1.2rem; display: inline-block; transition: 0.3s;" onmouseover="this.style.backgroundColor='#dc2626'" onmouseout="this.style.backgroundColor='#ef4444'">ENTER THE SHOP 🛒</a>
+            <p style="font-size: 1.5rem; margin-bottom: 40px; color: #d1d5db; max-width: 800px;">Your ultimate destination for premium motorcycle parts and expert services.</p>
+            <a href="shop.php" class="btn-generate" style="padding: 18px 40px; font-size: 1.2rem; text-decoration: none; display: inline-block;">ENTER THE SHOP 🛒</a>
         </div>
     </div>
 
+    <script src="script.js?v=<?php echo time(); ?>"></script>
 </body>
 </html>

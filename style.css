@@ -1132,3 +1132,54 @@ body {
     color: #ef4444; 
     transform: scale(1.1);
 }
+
+/* ========================================= */
+/* HOME PAGE STYLES                          */
+/* ========================================= */
+.home-hero {
+    /* Calculates height minus the header height so it fits perfectly */
+    height: calc(100vh - 70px); 
+    background: linear-gradient(rgba(17, 24, 39, 0.7), rgba(17, 24, 39, 0.9)), url('uploads/home_bg.jpg') center/cover;
+    background-color: #111827; /* Fallback if no image exists */
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    color: white;
+    padding: 0 20px;
+}
+.home-hero h1 {
+    font-size: 4.5rem;
+    font-weight: 900;
+    margin: 0 0 15px 0;
+    letter-spacing: -2px;
+    line-height: 1.1;
+}
+.home-hero h1 span {
+    color: #ef4444;
+}
+.home-hero p {
+    color: #9ca3af;
+    font-size: 1.2rem;
+    max-width: 600px;
+    margin: 0 0 40px 0;
+    line-height: 1.6;
+}
+.btn-home {
+    background: #ef4444;
+    color: white;
+    padding: 16px 45px;
+    font-size: 18px;
+    font-weight: 900;
+    text-decoration: none;
+    border-radius: 6px;
+    transition: 0.3s;
+    border: none;
+    box-shadow: 0 4px 6px -1px rgba(239, 68, 68, 0.4);
+}
+.btn-home:hover {
+    background: #dc2626;
+    transform: translateY(-3px);
+    box-shadow: 0 10px 15px -3px rgba(239, 68, 68, 0.4);
+}

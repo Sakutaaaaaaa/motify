@@ -3,7 +3,7 @@
 session_start();
 require_once 'db_connection.php';
 
-// NEW: Safely Delete Item Logic
+// Safely Delete Item Logic
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['delete_item'])) {
     $delete_id = intval($_POST['delete_id']);
     
@@ -43,59 +43,73 @@ if ($result->num_rows > 0) {
         } elseif ($row['category'] == 'Service' || $row['category'] == 'Services') {
             $services[] = $row;
         } else {
-            // Catches 'Part' and any old 'Product' entries
             $parts[] = $row; 
         }
     }
 }
 
-// Helper function to render product cards so we don't repeat code
+// Helper function to render product cards
 function renderCards($itemsArray) {
     if (empty($itemsArray)) {
         echo "<p style='color:#9ca3af;'>No items in this category yet.</p>";
         return;
     }
     
+    $fallback_img = "https://via.placeholder.com/300x200/111827/9ca3af?text=No+Image";
+    
     echo "<div class='inventory-grid'>";
     foreach ($itemsArray as $row) {
-        $img_src = !empty($row["image_path"]) ? htmlspecialchars($row["image_path"]) : 'uploads/default_part.png';
         $id = $row['product_id'];
         $name = htmlspecialchars($row["product_name"]);
-        $safe_name = addslashes($row["product_name"]); // Prevents quotes from breaking the Javascript alert
+        $safe_name = addslashes($row["product_name"]); 
+        $category = $row["category"];
         
-        echo "<div class='product-card' style='display:flex; flex-direction:column;'>";
-        echo "<img src='" . $img_src . "' alt='Part Image' class='product-image' onerror=\"this.onerror=null; this.src='uploads/default_part.png'\">";
-        echo "<div class='card-body' style='display:flex; flex-direction:column; flex-grow:1;'>";
-        echo "<h3 class='product-title'>" . $name . "</h3>";
+        echo "<div class='product-card' style='display:flex; flex-direction:column; overflow:hidden; border: 1px solid #374151; border-radius: 8px; background: #1f2937;'>";
         
-        // Hide category label on the card since they are now grouped by section
-        echo "<div class='product-price'>₱" . number_format($row["selling_price"], 2) . "</div>";
-        
-        echo "<div class='stock-status'>";
-        if ($row["category"] == 'Service' || $row["category"] == 'Services') {
-            echo "<span class='service-badge'>🔧 Service (N/A)</span>";
+        // ==========================================
+        // THE FIX: NO IMAGES FOR SERVICES
+        // ==========================================
+        if ($category == 'Service' || $category == 'Services') {
+            // Render a clean blue box with a wrench icon instead of an image
+            echo "<div style='width: 100%; height: 180px; background: rgba(59, 130, 246, 0.05); border-bottom: 1px solid #374151; display: flex; align-items: center; justify-content: center; font-size: 60px;'>🔧</div>";
         } else {
-            echo "Stock: <strong>" . $row["stock_quantity"] . "</strong>";
+            // Render the normal image for physical products
+            if (!empty($row["image_path"]) && $row["image_path"] !== 'uploads/default_part.png') {
+                $img_src = htmlspecialchars($row["image_path"]);
+            } else {
+                $img_src = $fallback_img;
+            }
+            echo "<img src='" . $img_src . "' alt='" . $name . "' class='product-image' style='width: 100%; height: 180px; object-fit: cover;' onerror=\"this.onerror=null; this.src='" . $fallback_img . "'\">";
+        }
+        // ==========================================
+        
+        echo "<div class='card-body' style='display:flex; flex-direction:column; flex-grow:1; padding: 15px;'>";
+        echo "<h3 class='product-title' style='margin-top:0; font-size: 16px; color: white;'>" . $name . "</h3>";
+        
+        echo "<div class='product-price' style='color:#10b981; font-weight:bold; font-size:18px; margin-bottom:10px;'>₱" . number_format($row["selling_price"], 2) . "</div>";
+        
+        echo "<div class='stock-status' style='font-size:13px; color:#9ca3af; margin-bottom:15px;'>";
+        if ($category == 'Service' || $category == 'Services') {
+            echo "<span style='background:rgba(59,130,246,0.1); color:#3b82f6; padding:4px 8px; border-radius:4px; font-weight:bold;'>🔧 Service (N/A)</span>";
+        } else {
+            echo "Stock: <strong style='color:white;'>" . $row["stock_quantity"] . "</strong>";
             if ($row["stock_quantity"] <= 5) {
-                echo "<span class='low-stock'>⚠ Low</span>";
+                echo "<span style='background:rgba(239,68,68,0.1); color:#ef4444; padding:2px 6px; border-radius:4px; margin-left:8px; font-size:11px; font-weight:bold;'>⚠ Low</span>";
             }
         }
         echo "</div>"; 
         
-        // The Side-by-Side Edit and Delete Buttons
-        echo "<div style='display: flex; gap: 8px; margin-top: auto; padding-top: 15px;'>";
+        echo "<div style='display: flex; gap: 8px; margin-top: auto;'>";
         
-        // Edit Button
         echo "<a href='edit_product.php?id=" . $id . "' style='flex: 1; text-align: center; background: #374151; color: white; padding: 8px; border-radius: 4px; text-decoration: none; font-size: 13px; font-weight: bold; transition: 0.2s;' onmouseover=\"this.style.background='#4b5563'\" onmouseout=\"this.style.background='#374151'\">Edit</a>";
         
-        // Delete Button
         echo "<form method='POST' style='flex: 1; margin: 0;' onsubmit=\"return confirm('⚠️ Are you sure you want to permanently delete " . $safe_name . "?');\">";
         echo "<input type='hidden' name='delete_id' value='" . $id . "'>";
         echo "<button type='submit' name='delete_item' style='width: 100%; background: transparent; color: #ef4444; border: 1px solid #ef4444; padding: 8px; border-radius: 4px; font-size: 13px; font-weight: bold; cursor: pointer; transition: 0.2s;' onmouseover=\"this.style.background='#ef4444'; this.style.color='white'\" onmouseout=\"this.style.background='transparent'; this.style.color='#ef4444'\">Delete</button>";
         echo "</form>";
         
-        echo "</div>"; // Close button flex container
-        echo "</div></div>"; // Close card-body and product-card
+        echo "</div>"; 
+        echo "</div></div>"; 
     }
     echo "</div>";
 }
@@ -112,18 +126,18 @@ function renderCards($itemsArray) {
     <?php include 'sidebar.php'; ?>
 
     <div class="main-content">
-        <div style="display: flex; justify-content: space-between; align-items: center;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
             <h1 style="margin: 0;">📦 Inventory Hub</h1>
             <a href="add_product.php" style="background: #ef4444; color: white; padding: 10px 20px; text-decoration: none; border-radius: 8px; font-weight: bold;">➕ Add New Item</a>
         </div>
 
-        <h2 class="section-header"><span>⚙️</span> Motorcycle Parts</h2>
+        <h2 class="section-header" style="margin-top: 20px; color: white; border-bottom: 1px solid #374151; padding-bottom: 10px;"><span>⚙️</span> Motorcycle Parts</h2>
         <?php renderCards($parts); ?>
 
-        <h2 class="section-header"><span>🏍️</span> Accessories</h2>
+        <h2 class="section-header" style="margin-top: 40px; color: white; border-bottom: 1px solid #374151; padding-bottom: 10px;"><span>🏍️</span> Accessories</h2>
         <?php renderCards($accessories); ?>
 
-        <h2 class="section-header"><span>🔧</span> Services</h2>
+        <h2 class="section-header" style="margin-top: 40px; color: white; border-bottom: 1px solid #374151; padding-bottom: 10px;"><span>🔧</span> Services</h2>
         <?php renderCards($services); ?>
 
     </div>

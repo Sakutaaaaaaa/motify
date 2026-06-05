@@ -18,29 +18,71 @@ function filterCustomers() {
 }
 
 // =========================================
-// DASHBOARD.PHP: Sales Analytics Chart
+// DASHBOARD SALES CHART (Live Monthly Data)
 // =========================================
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener("DOMContentLoaded", function() {
     const ctx = document.getElementById('salesChart');
     if (ctx) {
+        // Safely pull data from the HTML canvas dataset
+        let chartLabels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        let chartData = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+        try {
+            if (ctx.dataset.labels) chartLabels = JSON.parse(ctx.dataset.labels);
+            if (ctx.dataset.values) chartData = JSON.parse(ctx.dataset.values);
+        } catch (e) {
+            console.error("Error parsing chart data:", e);
+        }
+
         new Chart(ctx, {
             type: 'line',
             data: {
-                labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
+                labels: chartLabels,
                 datasets: [{
-                    label: 'Revenue (PHP)',
-                    data: [12000, 19000, 15000, 22000, 18000, 28000],
+                    label: 'Revenue (₱)',
+                    data: chartData,
                     borderColor: '#ef4444',
                     backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                    borderWidth: 3,
                     tension: 0.4,
-                    fill: true
+                    fill: true,
+                    pointBackgroundColor: '#ef4444',
+                    pointBorderColor: '#111827',
+                    pointBorderWidth: 2,
+                    pointRadius: 4,
+                    pointHoverRadius: 6
                 }]
             },
             options: {
-                plugins: { legend: { display: false } },
-                scales: { 
-                    y: { grid: { color: '#374151' }, ticks: { color: '#9ca3af' } },
-                    x: { grid: { display: false }, ticks: { color: '#9ca3af' } }
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                return '₱' + context.parsed.y.toLocaleString(undefined, {minimumFractionDigits: 2});
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        suggestedMax: 100000, // Forces the chart to scale to at least 100k!
+                        grid: { color: '#374151', drawBorder: false },
+                        ticks: { 
+                            color: '#9ca3af',
+                            callback: function(value) {
+                                // Formats the side numbers with commas (e.g., ₱20,000)
+                                return '₱' + value.toLocaleString();
+                            }
+                        }
+                    },
+                    x: {
+                        grid: { display: false },
+                        ticks: { color: '#9ca3af' }
+                    }
                 }
             }
         });
@@ -530,6 +572,91 @@ function closeRateModal() {
     var modal = document.getElementById('rateModal');
     if (modal) modal.style.display = 'none';
 }
+
+// =========================================
+// SERVICE RATING MODALS
+// =========================================
+function openServiceRateModal(serviceName, bookingId) {
+    const modal = document.getElementById('rateServiceModal');
+    if (modal) {
+        modal.style.display = 'flex';
+        document.getElementById('rateServiceNameDisplay').innerText = serviceName;
+        document.getElementById('rateServiceInput').value = serviceName;
+        document.getElementById('rateBookingIdInput').value = bookingId;
+    }
+}
+
+function closeServiceRateModal() {
+    const modal = document.getElementById('rateServiceModal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+}
+
+// =========================================
+// ACCOUNT DASHBOARD MODALS
+// =========================================
+
+function openItemRateModal(productName, salesId) {
+    const modal = document.getElementById('rateModal');
+    if (modal) {
+        modal.style.display = 'flex';
+        document.getElementById('rateProductNameDisplay').innerText = productName;
+        document.getElementById('rateProductInput').value = productName;
+        document.getElementById('rateSalesIdInput').value = salesId;
+    }
+}
+
+function closeRateModal() {
+    const modal = document.getElementById('rateModal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+}
+
+// =========================================
+// ADMIN DASHBOARD CHARTS
+// =========================================
+document.addEventListener("DOMContentLoaded", function() {
+    const ctx = document.getElementById('salesChart');
+    if (ctx) {
+        const labels = JSON.parse(ctx.getAttribute('data-labels'));
+        const data = JSON.parse(ctx.getAttribute('data-values'));
+        
+        new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Revenue (₱)',
+                    data: data,
+                    borderColor: '#ef4444',
+                    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                    borderWidth: 2,
+                    fill: true,
+                    tension: 0.4
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: { display: false }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        grid: { color: '#374151' },
+                        ticks: { color: '#9ca3af', callback: function(value) { return '₱' + value; } }
+                    },
+                    x: {
+                        grid: { display: false },
+                        ticks: { color: '#9ca3af' }
+                    }
+                }
+            }
+        });
+    }
+});
 
 // =========================================
 // PHILIPPINE ADDRESS API (PSGC) INTEGRATION

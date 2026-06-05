@@ -3,6 +3,18 @@
 session_start();
 require_once 'db_connection.php';
 
+// === 🚀 SILENT DATABASE AUTO-REPAIR SCRIPT 🚀 ===
+// 1. Removes the strict ENUM lock that caused the blank "-" status
+$conn->query("ALTER TABLE service_bookings MODIFY COLUMN booking_status VARCHAR(50) DEFAULT 'Pending'");
+// 2. Creates a dedicated rating column just for services if it doesn't exist
+$check_rating_col = $conn->query("SHOW COLUMNS FROM service_bookings LIKE 'service_rating'");
+if ($check_rating_col && $check_rating_col->num_rows == 0) {
+    $conn->query("ALTER TABLE service_bookings ADD COLUMN service_rating INT DEFAULT 0");
+}
+// 3. Magically repairs your broken/blank booking back to "Completed" so you can rate it!
+$conn->query("UPDATE service_bookings SET booking_status = 'Completed' WHERE booking_status = '' OR booking_status IS NULL");
+// ================================================
+
 $auth_message = "";
 
 // --- 1. HANDLE LOGOUT ---
@@ -147,13 +159,18 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['confirm_receipt']) && 
 
 // --- 8. PROCESS PRODUCT RATING ---
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['submit_rating']) && isset($_SESSION['customer_id'])) {
-    $p_name = $_POST['rate_product_name'];
+    $p_name = trim($_POST['rate_product_name']);
+    $sales_id = intval($_POST['rate_sales_id']);
     $stars = intval($_POST['stars']);
     $c_name = $_SESSION['customer_name'];
 
-    $stmt_rate = $conn->prepare("UPDATE products SET rating_sum = rating_sum + ?, rating_count = rating_count + 1 WHERE product_name = ?");
+    $stmt_rate = $conn->prepare("UPDATE products SET rating_sum = COALESCE(rating_sum, 0) + ?, rating_count = COALESCE(rating_count, 0) + 1 WHERE product_name = ?");
     $stmt_rate->bind_param("is", $stars, $p_name);
     $stmt_rate->execute();
+
+    $stmt_complete = $conn->prepare("UPDATE sales SET order_status = 'Completed' WHERE sales_id = ?");
+    $stmt_complete->bind_param("i", $sales_id);
+    $stmt_complete->execute();
 
     $admin_title = "New Product Rating ⭐";
     $admin_msg = "$c_name just rated $p_name with $stars/5 Stars!";
@@ -161,7 +178,29 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['submit_rating']) && is
     $stmt_admin_notif->bind_param("ss", $admin_title, $admin_msg);
     $stmt_admin_notif->execute();
 
-    $auth_message = "<div style='color:#10b981; background:rgba(16, 185, 129, 0.1); padding:10px; border-radius:6px; margin-bottom:15px; border: 1px solid #10b981;'>✅ Thank you for rating the $p_name!</div>";
+    $auth_message = "<div style='color:#10b981; background:rgba(16, 185, 129, 0.1); padding:10px; border-radius:6px; margin-bottom:15px; border: 1px solid #10b981;'>✅ Thank you for rating the $p_name! Your order is now completed.</div>";
+}
+
+// --- NEW 8b: PROCESS SERVICE RATING (BULLETPROOF INDEPENDENT FIX) ---
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['submit_service_rating']) && isset($_SESSION['customer_id'])) {
+    $s_name = trim($_POST['rate_service_name']);
+    $stars = intval($_POST['stars']);
+    $cid = $_SESSION['customer_id'];
+    $c_name = $_SESSION['customer_name'];
+
+    // Update the rating DIRECTLY on the booking row! Bypasses the products table entirely.
+    $stmt_rate = $conn->prepare("UPDATE service_bookings SET booking_status = 'Rated', service_rating = ? WHERE customer_id = ? AND service_type = ? AND booking_status = 'Completed'");
+    $stmt_rate->bind_param("iis", $stars, $cid, $s_name);
+    $stmt_rate->execute();
+
+    // Notify Admin
+    $admin_title = "New Service Rating ⭐";
+    $admin_msg = "$c_name just rated their service ($s_name) with $stars/5 Stars!";
+    $stmt_admin_notif = $conn->prepare("INSERT INTO admin_notifications (title, message) VALUES (?, ?)");
+    $stmt_admin_notif->bind_param("ss", $admin_title, $admin_msg);
+    $stmt_admin_notif->execute();
+
+    $auth_message = "<div style='color:#10b981; background:rgba(16, 185, 129, 0.1); padding:10px; border-radius:6px; margin-bottom:15px; border: 1px solid #10b981;'>✅ Thank you for rating your service experience!</div>";
 }
 
 // --- 9. FETCH ALL DASHBOARD DATA ---
@@ -406,7 +445,7 @@ if (isset($_SESSION['customer_id'])) {
                                     $s_color = '#f59e0b'; $s_bg = 'rgba(245, 158, 11, 0.1)';
                                     if ($o_status == 'Shipped') { $s_color = '#3b82f6'; $s_bg = 'rgba(59, 130, 246, 0.1)'; }
                                     if ($o_status == 'Received') { $s_color = '#8b5cf6'; $s_bg = 'rgba(139, 92, 246, 0.1)'; }
-                                    if ($o_status == 'Delivered') { $s_color = '#10b981'; $s_bg = 'rgba(16, 185, 129, 0.1)'; }
+                                    if ($o_status == 'Delivered' || $o_status == 'Completed') { $s_color = '#10b981'; $s_bg = 'rgba(16, 185, 129, 0.1)'; }
                                 ?>
                                     <div style="background: #111827; padding: 15px; border-radius: 8px; border-left: 4px solid <?php echo $s_color; ?>;">
                                         <div style="display: flex; justify-content: space-between; align-items: flex-start;">
@@ -432,7 +471,12 @@ if (isset($_SESSION['customer_id'])) {
                                             </div>
                                         <?php elseif ($o_status == 'Delivered'): ?>
                                             <div style="display: flex; gap: 10px; border-top: 1px dashed #374151; padding-top: 12px; margin-top: 12px;">
-                                                <button type="button" onclick="openRateModal('<?php echo addslashes($order['product_name']); ?>')" style="flex: 1; background: transparent; border: 1px solid #374151; color: #f59e0b; padding: 8px; border-radius: 4px; font-size: 12px; font-weight: bold; cursor: pointer; transition: 0.2s;" onmouseover="this.style.background='rgba(245, 158, 11, 0.1)'; this.style.borderColor='#f59e0b';" onmouseout="this.style.background='transparent'; this.style.borderColor='#374151';">Rate ⭐</button>
+                                                <button type="button" onclick="openItemRateModal('<?php echo addslashes($order['product_name']); ?>', <?php echo $order['sales_id']; ?>)" style="flex: 1; background: transparent; border: 1px solid #374151; color: #f59e0b; padding: 8px; border-radius: 4px; font-size: 12px; font-weight: bold; cursor: pointer; transition: 0.2s;" onmouseover="this.style.background='rgba(245, 158, 11, 0.1)'; this.style.borderColor='#f59e0b';" onmouseout="this.style.background='transparent'; this.style.borderColor='#374151';">Rate ⭐</button>
+                                                <a href="shop.php" style="flex: 1; text-align: center; background: rgba(59, 130, 246, 0.1); border: 1px solid #3b82f6; color: #3b82f6; padding: 8px; border-radius: 4px; font-size: 12px; font-weight: bold; text-decoration: none; transition: 0.2s;" onmouseover="this.style.background='rgba(59, 130, 246, 0.2)'" onmouseout="this.style.background='rgba(59, 130, 246, 0.1)'">Buy Again 🛒</a>
+                                            </div>
+                                        <?php elseif ($o_status == 'Completed'): ?>
+                                            <div style="display: flex; gap: 10px; border-top: 1px dashed #374151; padding-top: 12px; margin-top: 12px;">
+                                                <button type="button" disabled style="flex: 1; background: rgba(16, 185, 129, 0.05); border: 1px solid #10b981; color: #10b981; padding: 8px; border-radius: 4px; font-size: 12px; font-weight: bold; cursor: default;">Order Completed ✅</button>
                                                 <a href="shop.php" style="flex: 1; text-align: center; background: rgba(59, 130, 246, 0.1); border: 1px solid #3b82f6; color: #3b82f6; padding: 8px; border-radius: 4px; font-size: 12px; font-weight: bold; text-decoration: none; transition: 0.2s;" onmouseover="this.style.background='rgba(59, 130, 246, 0.2)'" onmouseout="this.style.background='rgba(59, 130, 246, 0.1)'">Buy Again 🛒</a>
                                             </div>
                                         <?php endif; ?>
@@ -454,20 +498,36 @@ if (isset($_SESSION['customer_id'])) {
                                 <?php foreach($my_bookings as $booking): 
                                     $b_status = $booking['booking_status'];
                                     $s_color = '#9ca3af'; $s_bg = 'rgba(156, 163, 175, 0.1)';
+                                    
                                     if($b_status == 'Pending') { $s_color = '#f59e0b'; $s_bg = 'rgba(245, 158, 11, 0.1)'; }
                                     if($b_status == 'Approved') { $s_color = '#3b82f6'; $s_bg = 'rgba(59, 130, 246, 0.1)'; }
                                     if($b_status == 'In Progress') { $s_color = '#8b5cf6'; $s_bg = 'rgba(139, 92, 246, 0.1)'; }
-                                    if($b_status == 'Completed') { $s_color = '#10b981'; $s_bg = 'rgba(16, 185, 129, 0.1)'; }
+                                    if($b_status == 'Completed' || $b_status == 'Rated') { $s_color = '#10b981'; $s_bg = 'rgba(16, 185, 129, 0.1)'; }
                                     if($b_status == 'Cancelled') { $s_color = '#ef4444'; $s_bg = 'rgba(239, 68, 68, 0.1)'; }
+                                    
+                                    $b_id = $booking['booking_id'] ?? $booking['id'] ?? 0;
                                 ?>
-                                    <div style="display: flex; justify-content: space-between; align-items: center; background: #111827; padding: 15px; border-radius: 8px; border-left: 4px solid <?php echo $s_color; ?>;">
-                                        <div>
-                                            <div style="font-weight: 900; color: white; font-size: 15px;"><?php echo htmlspecialchars($booking['service_type']); ?></div>
-                                            <div style="font-size: 12px; color: #9ca3af; margin-top: 4px;"><?php echo date("M d, Y", strtotime($booking['booking_date'])); ?> • <?php echo date("h:i A", strtotime($booking['booking_time'])); ?></div>
+                                    <div style="background: #111827; padding: 15px; border-radius: 8px; border-left: 4px solid <?php echo $s_color; ?>;">
+                                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                                            <div>
+                                                <div style="font-weight: 900; color: white; font-size: 15px;"><?php echo htmlspecialchars($booking['service_type']); ?></div>
+                                                <div style="font-size: 12px; color: #9ca3af; margin-top: 4px;"><?php echo date("M d, Y", strtotime($booking['booking_date'])); ?> • <?php echo date("h:i A", strtotime($booking['booking_time'])); ?></div>
+                                            </div>
+                                            <div style="text-align: right;">
+                                                <div style="color: <?php echo $s_color; ?>; font-weight: 900; font-size: 12px; background: <?php echo $s_bg; ?>; padding: 4px 10px; border-radius: 20px; display: inline-block;"><?php echo $b_status; ?></div>
+                                            </div>
                                         </div>
-                                        <div style="text-align: right;">
-                                            <div style="color: <?php echo $s_color; ?>; font-weight: 900; font-size: 12px; background: <?php echo $s_bg; ?>; padding: 4px 10px; border-radius: 20px; display: inline-block;"><?php echo $b_status; ?></div>
-                                        </div>
+                                        
+                                        <?php if ($b_status == 'Completed'): ?>
+                                            <div style="border-top: 1px dashed #374151; padding-top: 12px; margin-top: 12px;">
+                                                <button type="button" onclick="openServiceRateModal('<?php echo addslashes($booking['service_type']); ?>', <?php echo $b_id; ?>)" style="width: 100%; background: transparent; border: 1px solid #374151; color: #f59e0b; padding: 8px; border-radius: 4px; font-size: 12px; font-weight: bold; cursor: pointer; transition: 0.2s;" onmouseover="this.style.background='rgba(245, 158, 11, 0.1)'; this.style.borderColor='#f59e0b';" onmouseout="this.style.background='transparent'; this.style.borderColor='#374151';">Rate Service ⭐</button>
+                                            </div>
+                                        <?php elseif ($b_status == 'Rated'): ?>
+                                            <div style="border-top: 1px dashed #374151; padding-top: 12px; margin-top: 12px;">
+                                                <button type="button" disabled style="width: 100%; background: rgba(16, 185, 129, 0.05); border: 1px solid #10b981; color: #10b981; padding: 8px; border-radius: 4px; font-size: 12px; font-weight: bold; cursor: default;">Service Rated ✅</button>
+                                            </div>
+                                        <?php endif; ?>
+                                        
                                     </div>
                                 <?php endforeach; ?>
                             </div>
@@ -476,6 +536,7 @@ if (isset($_SESSION['customer_id'])) {
                 </div>
             </div>
 
+            <!-- Existing Modals -->
             <div id="addAddressModal" class="modal-overlay">
                 <div class="modal-content">
                     <span class="close-btn" onclick="closeAddAddressModal()">&times;</span>
@@ -569,6 +630,7 @@ if (isset($_SESSION['customer_id'])) {
                 </div>
             </div>
 
+            <!-- Product Rating Modal -->
             <div id="rateModal" class="modal-overlay">
                 <div class="modal-content" style="max-width: 400px; text-align: center;">
                     <span class="close-btn" onclick="closeRateModal()">&times;</span>
@@ -577,6 +639,7 @@ if (isset($_SESSION['customer_id'])) {
                     
                     <form method="POST" action="">
                         <input type="hidden" name="rate_product_name" id="rateProductInput">
+                        <input type="hidden" name="rate_sales_id" id="rateSalesIdInput">
                         
                         <select name="stars" class="auth-input" style="background:#111827; border:1px solid #374151; margin-bottom: 20px; width: 100%; box-sizing: border-box; text-align: center; font-size: 18px;" required>
                             <option value="5">⭐⭐⭐⭐⭐ Excellent!</option>
@@ -590,6 +653,31 @@ if (isset($_SESSION['customer_id'])) {
                     </form>
                 </div>
             </div>
+
+            <!-- Service Rating Modal -->
+            <div id="rateServiceModal" class="modal-overlay">
+                <div class="modal-content" style="max-width: 400px; text-align: center;">
+                    <span class="close-btn" onclick="closeServiceRateModal()">&times;</span>
+                    <h2 style="color: white; margin-top: 0; margin-bottom: 5px;">Rate Service ⭐</h2>
+                    <p id="rateServiceNameDisplay" style="color: #9ca3af; font-size: 14px; margin-bottom: 20px;"></p>
+                    
+                    <form method="POST" action="">
+                        <input type="hidden" name="rate_service_name" id="rateServiceInput">
+                        <input type="hidden" name="rate_booking_id" id="rateBookingIdInput">
+                        
+                        <select name="stars" class="auth-input" style="background:#111827; border:1px solid #374151; margin-bottom: 20px; width: 100%; box-sizing: border-box; text-align: center; font-size: 18px;" required>
+                            <option value="5">⭐⭐⭐⭐⭐ Excellent!</option>
+                            <option value="4">⭐⭐⭐⭐ Good</option>
+                            <option value="3">⭐⭐⭐ Average</option>
+                            <option value="2">⭐⭐ Poor</option>
+                            <option value="1">⭐ Terrible</option>
+                        </select>
+
+                        <button type="submit" name="submit_service_rating" class="btn-generate" style="width: 100%; justify-content: center; padding: 12px; font-size: 15px; background: #3b82f6; color: white;">Submit Rating</button>
+                    </form>
+                </div>
+            </div>
+            
         <?php endif; ?>
     </div>
 

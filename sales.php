@@ -24,7 +24,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['cart_data'])) {
                 $stmt_sale->execute();
                 
                 // Only deduct inventory if it is NOT a Service
-                if ($item['category'] != 'Service') {
+                if ($item['category'] != 'Service' && $item['category'] != 'Services') {
                     $stmt_inv = $conn->prepare("UPDATE Inventory SET stock_quantity = stock_quantity - ? WHERE product_id = ?");
                     $stmt_inv->bind_param("ii", $qty, $id);
                     $stmt_inv->execute();
@@ -43,7 +43,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['cart_data'])) {
 $sql = "SELECT p.product_id, p.product_name, p.category, p.selling_price, p.image_path, i.stock_quantity 
         FROM Products p
         INNER JOIN Inventory i ON p.product_id = i.product_id
-        WHERE i.stock_quantity > 0 OR p.category = 'Service'
+        WHERE i.stock_quantity > 0 OR p.category = 'Service' OR p.category = 'Services'
         ORDER BY p.product_name ASC";
 $result = $conn->query($sql);
 ?>
@@ -67,8 +67,10 @@ $result = $conn->query($sql);
                 <div class="pos-grid">
                     <?php
                     if ($result->num_rows > 0) {
+                        // Reliable web placeholder for parts without images
+                        $fallback_img = "https://via.placeholder.com/150x150/111827/9ca3af?text=No+Image";
+                        
                         while($row = $result->fetch_assoc()) {
-                            $img = !empty($row["image_path"]) ? htmlspecialchars($row["image_path"]) : 'uploads/default_part.png';
                             $id = $row['product_id'];
                             $name = htmlspecialchars($row['product_name']);
                             $price = $row['selling_price'];
@@ -76,8 +78,25 @@ $result = $conn->query($sql);
                             
                             // UPDATED: Now calls POSTerminal.addToCart
                             echo "<div class='pos-item' onclick='POSTerminal.addToCart($id, \"$name\", $price, \"$cat\")'>";
-                            echo "<img src='$img' onerror=\"this.onerror=null; this.src='uploads/default_part.png'\">";
-                            echo "<div style='font-size:14px; color:#f3f4f6; font-weight:bold;'>$name</div>";
+                            
+                            // ==========================================
+                            // THE FIX: NO IMAGES FOR SERVICES
+                            // ==========================================
+                            if ($cat == 'Service' || $cat == 'Services') {
+                                // Render a clean blue box with a wrench icon instead of an image
+                                echo "<div style='width: 100%; height: 100px; background: rgba(59, 130, 246, 0.05); border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 40px; margin-bottom: 8px;'>🔧</div>";
+                            } else {
+                                // Render the normal image for physical products
+                                if (!empty($row["image_path"]) && $row["image_path"] !== 'uploads/default_part.png') {
+                                    $img_src = htmlspecialchars($row["image_path"]);
+                                } else {
+                                    $img_src = $fallback_img;
+                                }
+                                echo "<img src='$img_src' style='width: 100%; height: 100px; object-fit: cover; border-radius: 6px; margin-bottom: 8px;' onerror=\"this.onerror=null; this.src='$fallback_img'\">";
+                            }
+                            // ==========================================
+                            
+                            echo "<div style='font-size:14px; color:#f3f4f6; font-weight:bold; line-height: 1.2; margin-bottom: 4px;'>$name</div>";
                             echo "<div style='color:#10b981; font-size:14px;'>₱" . number_format($price, 2) . "</div>";
                             echo "</div>";
                         }

@@ -100,11 +100,11 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['cart_data'])) {
     }
 }
 
-// 2. Fetch Items + NEW RATING COLUMNS
+// 2. Fetch Items + NEW RATING COLUMNS (FIX: Removed the > 0 stock limit so Out of Stock items show up!)
 $sql = "SELECT p.product_id, p.product_name, p.category, p.selling_price, p.image_path, p.rating_sum, p.rating_count, i.stock_quantity 
         FROM Products p
         INNER JOIN Inventory i ON p.product_id = i.product_id
-        WHERE i.stock_quantity > 0 AND p.category NOT IN ('Service', 'Services')
+        WHERE p.category NOT IN ('Service', 'Services')
         ORDER BY p.product_name ASC";
 $result = $conn->query($sql);
 
@@ -250,11 +250,16 @@ if (isset($_SESSION['customer_id'])) {
                         echo "  <div class='product-image-wrapper'>";
                         echo "      <div class='badge-container'>";
                         echo "          <span class='badge badge-category'>$category</span>";
-                        if ($stock > 0 && $stock <= 5) {
+                        
+                        // FIX: Updated Stock Logic
+                        if ($stock <= 0) {
+                            echo "          <span class='badge' style='background:#ef4444;'>Out of Stock</span>";
+                        } else if ($stock <= 5) {
                             echo "          <span class='badge' style='background:#f59e0b;'>Low Stock</span>";
-                        } else if ($stock > 0) {
+                        } else {
                             echo "          <span class='badge badge-stock'>In Stock</span>";
                         }
+                        
                         echo "      </div>";
                         echo "      <button class='btn-wishlist' onclick='Storefront.toggleWishlist(this, event)' title='Save to Wishlist'>❤️</button>";
                         echo "      <img src='$img' class='product-image' onerror=\"this.onerror=null; this.src='uploads/default_part.png'\">";
@@ -265,7 +270,14 @@ if (isset($_SESSION['customer_id'])) {
                         // INJECTED DYNAMIC RATING HERE
                         echo "      <div class='product-meta'><span style='display:flex; align-items:center; gap:2px;'>$stars_html</span> <span style='margin-left:auto;'>Universal Fit</span></div>";
                         echo "      <div class='product-price' style='color:#ef4444; font-weight:900; font-size:22px; margin-top:auto;'>₱" . number_format($price, 2) . "</div>";
-                        echo "      <button type='button' class='btn-generate' style='width:100%; justify-content:center; margin-top:15px; transition:0.3s;' onclick=\"Storefront.addToCart($id, '$safe_name', $price)\">Add to Cart 🛒</button>";
+                        
+                        // FIX: Change button depending on stock availability
+                        if ($stock <= 0) {
+                            echo "      <button type='button' disabled style='width:100%; justify-content:center; margin-top:15px; background:#374151; color:#9ca3af; border:none; padding:12px; border-radius:6px; font-weight:bold; cursor:not-allowed; opacity: 0.7;'>Out of Stock</button>";
+                        } else {
+                            echo "      <button type='button' class='btn-generate' style='width:100%; justify-content:center; margin-top:15px; transition:0.3s;' onclick=\"Storefront.addToCart($id, '$safe_name', $price)\">Add to Cart 🛒</button>";
+                        }
+                        
                         echo "  </div>";
                         echo "</div>";
                     }
