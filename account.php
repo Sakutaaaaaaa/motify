@@ -184,8 +184,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['submit_service_rating'
     $cid = $_SESSION['customer_id'];
     $c_name = $_SESSION['customer_name'];
 
-    $stmt_rate = $conn->prepare("UPDATE service_bookings SET booking_status = 'Rated', service_rating = ? WHERE id = ? OR booking_id = ? OR (customer_id = ? AND service_type = ?)");
-    $stmt_rate->bind_param("iiiis", $stars, $booking_id, $booking_id, $cid, $s_name);
+    // FIXED: Removed the 'id = ?' check since the table exclusively uses 'booking_id'
+    $stmt_rate = $conn->prepare("UPDATE service_bookings SET booking_status = 'Rated', service_rating = ? WHERE booking_id = ? OR (customer_id = ? AND service_type = ?)");
+    $stmt_rate->bind_param("iiis", $stars, $booking_id, $cid, $s_name);
     $stmt_rate->execute();
 
     $admin_title = "New Service Rating ⭐";
